@@ -24,6 +24,7 @@ clear error if `MONGODB_URI` is missing or the database cannot be reached.
 - `npm run dev` — run the server with `tsx` watch mode.
 - `npm run typecheck` — type-check without emitting files.
 - `npm run build` — compile TypeScript into `dist/`.
+- `npm test` — build and run the Node.js equipment-search tests.
 - `npm start` — run the compiled server.
 
 ## Health check
@@ -67,3 +68,45 @@ In development and test environments only, these routes exercise the middleware:
 Retrieve an access token from Better Auth's `/api/auth/token` endpoint (or
 `authClient.token()`) and send it as `Authorization: Bearer <token>`. These test
 routes are not mounted in production.
+
+## Public equipment listing
+
+`GET /api/equipment` returns only approved, non-deleted equipment. Supported
+query parameters:
+
+| Parameter | Description |
+| --- | --- |
+| `search` | Case-insensitive literal search across name, description, brand, model, and location. Regex characters are escaped. |
+| `category` | Equipment category; accepts canonical category names and frontend slugs (`construction`, `photography`, `vehicles`, `agriculture`, `electronics`, `event`). |
+| `location` | Case-insensitive literal substring match. |
+| `rentalType` | `daily`, `weekly`, or `monthly`. |
+| `minPrice`, `maxPrice` | Inclusive, non-negative price bounds. |
+| `availability` | `true` means `availableQuantity > 0`; `false` means zero. |
+| `sort` | `price_asc`, `price_desc`, `newest` (default), or `oldest`. |
+| `page` | One-based page number; defaults to `1`. |
+| `limit` | Page size; defaults to `9`, maximum `50`. |
+
+Example:
+
+```http
+GET /api/equipment?search=canon&category=photography&location=dhaka&rentalType=daily&minPrice=1000&maxPrice=5000&availability=true&sort=price_asc&page=1&limit=9
+```
+
+The response retains the existing `{ success, data }` convention and adds a
+message and pagination metadata:
+
+```json
+{
+  "success": true,
+  "message": "Equipment fetched successfully.",
+  "data": [],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 0,
+    "totalItems": 0,
+    "limit": 9,
+    "hasNextPage": false,
+    "hasPrevPage": false
+  }
+}
+```

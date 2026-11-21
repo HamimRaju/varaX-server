@@ -11,6 +11,108 @@ import type {
   CreateEquipmentInput,
   UpdateEquipmentInput,
 } from "../utils/equipment-validation.js";
+import {
+  escapeRegex,
+  type EquipmentSearchQuery,
+  type EquipmentSort,
+} from "../utils/equipment-search-validation.js";
+
+export const PUBLIC_EQUIPMENT_PROJECTION =
+  "_id name category location price rentalType availableQuantity image createdAt";
+
+type EquipmentFilter = ReturnType<
+  ReturnType<typeof Equipment.find>["getFilter"]
+>;
+
+const equipmentSortOrders: Record<EquipmentSort, Record<string, 1 | -1>> = {
+  price_asc: { price: 1, _id: 1 },
+  price_desc: { price: -1, _id: -1 },
+  newest: { createdAt: -1, _id: -1 },
+  oldest: { createdAt: 1, _id: 1 },
+};
+
+export function buildPublicEquipmentFilter(
+  query: EquipmentSearchQuery,
+): EquipmentFilter {
+  const filter: EquipmentFilter = {
+    status: "approved",
+    isDeleted: false,
+  };
+
+  if (query.search) {
+    const regex = escapeRegex(query.search);
+    filter.$or = ["name", "description", "brand", "model", "location"].map(
+      (field) => ({
+        [field]: { $regex: regex, $options: "i" },
+      }),
+    );
+  }
+
+  if (query.category) {
+    filter.category = query.category;
+  }
+
+  if (query.location) {
+    filter.location = {
+      $regex: escapeRegex(query.location),
+      $options: "i",
+    };
+  }
+
+  if (query.rentalType) {
+    filter.rentalType = query.rentalType;
+  }
+
+  if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+    filter.price = {
+      ...(query.minPrice === undefined ? {} : { $gte: query.minPrice }),
+      ...(query.maxPrice === undefined ? {} : { $lte: query.maxPrice }),
+    };
+  }
+
+  if (query.availability !== undefined) {
+    filter.availableQuantity = query.availability ? { $gt: 0 } : 0;
+  }
+
+  return filter;
+}
+
+export interface EquipmentPagination {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  limit: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
+export async function searchPublicEquipment(query: EquipmentSearchQuery) {
+  const filter = buildPublicEquipmentFilter(query);
+  const skip = (query.page - 1) * query.limit;
+
+  const [equipment, totalItems] = await Promise.all([
+    Equipment.find(filter)
+      .select(PUBLIC_EQUIPMENT_PROJECTION)
+      .sort(equipmentSortOrders[query.sort])
+      .skip(skip)
+      .limit(query.limit)
+      .lean()
+      .exec(),
+    Equipment.countDocuments(filter).exec(),
+  ]);
+
+  const totalPages = Math.ceil(totalItems / query.limit);
+  const pagination: EquipmentPagination = {
+    currentPage: query.page,
+    totalPages,
+    totalItems,
+    limit: query.limit,
+    hasNextPage: query.page < totalPages,
+    hasPrevPage: query.page > 1,
+  };
+
+  return { equipment, pagination };
+}
 
 const reviewRequiredFields = [
   "name",
@@ -41,12 +143,6 @@ function notFound(): never {
 function validateId(id: unknown): Types.ObjectId {
   const validId = parseEquipmentId(id);
   return new Types.ObjectId(validId);
-}
-
-export async function listPublicEquipment() {
-  return Equipment.find({ status: "approved", isDeleted: false })
-    .lean()
-    .exec();
 }
 
 export async function listOwnerEquipment(ownerId: Types.ObjectId) {

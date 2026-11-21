@@ -87,6 +87,9 @@ equipmentSchema.index({ category: 1 });
 equipmentSchema.index({ location: 1 });
 equipmentSchema.index({ createdAt: -1 });
 equipmentSchema.index({ price: 1 });
+// Cover the public approved/non-deleted feed and its common sort orders.
+equipmentSchema.index({ status: 1, isDeleted: 1, createdAt: -1 });
+equipmentSchema.index({ status: 1, isDeleted: 1, price: 1 });
 
 export const Equipment =
   (mongoose.models.Equipment as Model<EquipmentFields> | undefined) ??

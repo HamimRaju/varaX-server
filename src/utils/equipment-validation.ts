@@ -15,7 +15,7 @@ const frontendCategoryAliases: Record<string, EquipmentCategory> = {
   event: "Event Equipment",
 };
 
-const categorySchema = z
+export const equipmentCategorySchema = z
   .string()
   .trim()
   .transform(
@@ -24,7 +24,7 @@ const categorySchema = z
   )
   .pipe(z.enum(EQUIPMENT_CATEGORIES));
 
-const rentalTypeSchema = z
+export const equipmentRentalTypeSchema = z
   .string()
   .trim()
   .transform((rentalType) => rentalType.toLowerCase())
@@ -47,10 +47,10 @@ const hostedImageUrlSchema = z
 const equipmentFieldsSchema = z.object({
   name: z.string().trim().min(1).max(90),
   description: z.string().trim().min(1).max(1_000),
-  category: categorySchema,
+  category: equipmentCategorySchema,
   location: z.string().trim().min(1).max(160),
   price: z.coerce.number().finite().positive(),
-  rentalType: rentalTypeSchema,
+  rentalType: equipmentRentalTypeSchema,
   availableQuantity: z.coerce.number().int().min(1),
   condition: z.string().trim().max(120).optional(),
   brand: z.string().trim().max(100).optional(),

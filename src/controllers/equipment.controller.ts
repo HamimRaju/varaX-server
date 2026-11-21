@@ -5,6 +5,7 @@ import {
   parseCreateEquipmentInput,
   parseUpdateEquipmentInput,
 } from "../utils/equipment-validation.js";
+import { parseEquipmentSearchQuery } from "../utils/equipment-search-validation.js";
 import * as equipmentService from "../services/equipment.service.js";
 
 function getAuthenticatedUser(
@@ -17,11 +18,17 @@ function getAuthenticatedUser(
 }
 
 export const listPublicEquipment: RequestHandler = async (
-  _request,
+  request,
   response,
 ) => {
-  const equipment = await equipmentService.listPublicEquipment();
-  response.status(200).json({ success: true, data: equipment });
+  const query = parseEquipmentSearchQuery(request.query);
+  const result = await equipmentService.searchPublicEquipment(query);
+  response.status(200).json({
+    success: true,
+    message: "Equipment fetched successfully.",
+    data: result.equipment,
+    pagination: result.pagination,
+  });
 };
 
 export const listMyEquipment: RequestHandler = async (
