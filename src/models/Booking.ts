@@ -31,6 +31,7 @@ export interface BookingFields {
   status?: BookingStatus;
   paymentStatus?: BookingPaymentStatus;
   stripeSessionId?: string;
+  checkoutAttemptVersion?: number;
   idempotencyKey?: string;
   requestFingerprint?: string;
   rejectionReason?: string;
@@ -124,6 +125,7 @@ const bookingSchema = new Schema<BookingFields>(
       default: "unpaid",
     },
     stripeSessionId: { type: String, trim: true },
+    checkoutAttemptVersion: { type: Number, default: 0, min: 0 },
     idempotencyKey: { type: String, trim: true, maxlength: 128 },
     requestFingerprint: { type: String, select: false },
     rejectionReason: { type: String, trim: true, maxlength: 1000 },

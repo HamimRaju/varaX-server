@@ -38,6 +38,8 @@ clear error if `MONGODB_URI` is missing or the database cannot be reached.
 | `PORT` | HTTP port (defaults to `5000`) |
 | `NODE_ENV` | `development`, `test`, or `production` |
 | `MONGODB_URI` | Required MongoDB connection string |
+| `STRIPE_SECRET_KEY` | Required Stripe secret key (`sk_test_…` or `sk_live_…`); server only |
+| `STRIPE_WEBHOOK_SECRET` | Required webhook signing secret (`whsec_…`); server only |
 | `CLIENT_URL` | Frontend origin allowed by CORS; required in production |
 | `JWT_ISSUER` | Must match the issuer configured in Better Auth |
 | `JWT_AUDIENCE` | Must match the audience configured in Better Auth |
@@ -284,3 +286,159 @@ MongoDB must run as a replica set or sharded cluster with transaction support.
 Standalone MongoDB deployments receive `503` for transaction-dependent booking
 operations; the server deliberately does not use a process-local lock or an
 unsafe fallback. Configure a replica set before enabling booking writes.
+
+## Stripe Checkout and payment status
+
+Stripe is initialized with the server-only `STRIPE_SECRET_KEY`. Set
+`STRIPE_WEBHOOK_SECRET` to the signing secret for the exact webhook endpoint.
+Both are required by the backend configuration and must never use a
+`NEXT_PUBLIC_` prefix or be sent to the browser. `.env` files remain ignored by
+Git; `.env.example` contains placeholders only.
+
+The backend uses BDT (`bdt`) and converts the booking's server-calculated
+major-unit `totalAmount` to integer paisa (`amountMinorUnits`) for Stripe. The
+Payment record retains the major-unit `amount` for compatibility and the
+integer minor-unit value as the authoritative Stripe amount. Before production,
+confirm that the connected Stripe account and enabled payment methods support
+BDT; unsupported currency/account combinations fail checkout safely instead of
+silently charging in another currency.
+
+| Method and path | Role | Purpose |
+| --- | --- | --- |
+| `POST /api/payments/create-checkout-session` | Customer | Create or reuse a Checkout Session for their pending booking |
+| `GET /api/payments/:bookingId/status` | Customer, equipment owner, or admin | Read safe, role-scoped payment status |
+| `POST /api/payments/webhook` | Stripe only | Verify and process Stripe events using the raw request body |
+
+Example request:
+
+```http
+POST /api/payments/create-checkout-session
+Authorization: Bearer <customer-token>
+Content-Type: application/json
+```
+
+```json
+{ "bookingId": "64a1b2c3d4e5f67890123456" }
+```
+
+The backend ignores client-provided amounts, currency, user IDs, and payment
+state. Example response:
+
+```json
+{
+  "success": true,
+  "message": "Checkout Session created.",
+  "data": {
+    "paymentId": "64a1b2c3d4e5f67890123457",
+    "sessionId": "cs_test_...",
+    "url": "https://checkout.stripe.com/c/pay/...",
+    "expiresAt": "2026-12-01T12:00:00.000Z"
+  }
+}
+```
+
+The caller redirects the browser to `data.url`. Repeated requests for the same
+booking return the existing active session. The backend stores a pending
+Payment attempt before calling Stripe and uses a server-generated Stripe
+idempotency key. A unique partial index allows no more than one active
+Checkout Session per booking.
+
+### Webhooks and payment lifecycle
+
+Configure the Stripe endpoint as
+`https://<backend-host>/api/payments/webhook` and subscribe to:
+
+- `checkout.session.completed`
+- `checkout.session.expired`
+- `checkout.session.async_payment_succeeded`
+- `checkout.session.async_payment_failed`
+- `payment_intent.payment_failed`
+- `charge.refunded`
+
+The webhook route is mounted before Express JSON parsing and uses
+`express.raw({ type: "application/json" })`. Stripe's signature is verified
+against those exact bytes. The frontend success redirect is never treated as
+payment evidence.
+
+Checkout creation leaves the booking `pending` and unpaid. A signed webhook
+must report `payment_status: "paid"` and match the stored amount, currency,
+session/payment identifiers, and booking snapshot. Within a MongoDB
+transaction, the backend serializes against the Step 08 equipment inventory
+marker, rechecks availability, and then marks both the Payment paid and the
+booking confirmed. It does not maintain a second reservation counter.
+
+Expired sessions and failed PaymentIntents mark the corresponding Payment (and
+eligible pending booking) failed; they never confirm a booking. Successful
+events are idempotent: processed Stripe event IDs are stored on the Payment,
+terminal payment states are not downgraded, and the transaction protects
+related Payment/Booking writes. Webhook handling also fails closed with `503`
+if MongoDB transactions are unavailable.
+
+A PaymentIntent failure alone does not necessarily close its Checkout Session.
+The payment attempt is marked failed but its active-session guard is retained
+while the session remains open, so a repeated checkout request reuses that same
+session instead of creating a second payable session. The guard is released
+when the session expires or reaches a terminal state.
+
+If Stripe reports a successful payment but the booking is cancelled, invalid,
+mispriced, or no longer has enough inventory, the backend records the Payment
+as paid with `fulfillmentStatus: "refund_required"` and does not confirm the
+booking. It then attempts a full Stripe refund with a stable idempotency key.
+On refund success, Payment and Booking are marked refunded. If the Stripe
+refund request fails or remains pending, the record remains visibly
+`refund_required` or `refund_pending`; operators must inspect the PaymentIntent,
+refund it in the Stripe Dashboard if necessary, and ensure Stripe delivers
+`charge.refunded`. That event reconciles the database. Do not delete the
+historical Payment record or manually mark an unverified payment refunded.
+
+For local webhook development:
+
+```sh
+stripe listen --forward-to localhost:5000/api/payments/webhook
+```
+
+Copy the CLI's `whsec_…` value into `STRIPE_WEBHOOK_SECRET`, then use Stripe
+test-mode Checkout sessions or `stripe trigger checkout.session.completed`.
+Automated tests use mocked Stripe calls and generated webhook signatures; they
+do not make real charges.
+
+### Frontend integration contract
+
+After a real backend booking has been created, the client obtains a Better Auth
+backend access token with `authClient.token()` and sends the request above.
+Redirect to the returned `data.url`. Stripe returns to
+`/payment-success?bookingId=<bookingId>&session_id=<CHECKOUT_SESSION_ID>` or
+`/payment?bookingId=<bookingId>`. On either return, fetch
+`GET /api/payments/<bookingId>/status` with the bearer token and show the
+backend's `data.status`; never set payment or booking status in local state
+based on the redirect.
+
+The current `varaX-client` payment and equipment booking flow still uses
+localStorage demo records, numeric equipment IDs, and `VX-…` booking IDs. Those
+are not MongoDB ObjectIds and cannot be charged by these endpoints. The client
+was intentionally left unchanged rather than adding a checkout call that could
+only fail; wire its booking creation to the Step 08 API and persist the returned
+Mongo booking ID before enabling this redirect flow.
+
+Once that backend booking ID is available, the minimal client call is:
+
+```ts
+const { data: tokenData } = await authClient.token();
+const response = await fetch(
+  `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/payments/create-checkout-session`,
+  {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${tokenData.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ bookingId }),
+  },
+);
+const result = await response.json();
+if (!response.ok) throw new Error(result.message);
+window.location.assign(result.data.url);
+```
+
+After Stripe redirects back, use the authenticated
+`GET /api/payments/${bookingId}/status` response for the displayed outcome.

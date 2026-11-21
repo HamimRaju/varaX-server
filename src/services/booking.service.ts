@@ -180,7 +180,7 @@ async function findIdempotentBooking(
   return booking;
 }
 
-async function getReservedQuantity(
+export async function getReservedQuantity(
   equipmentId: Types.ObjectId,
   range: DateRange,
   session?: ClientSession,
@@ -203,7 +203,7 @@ async function getReservedQuantity(
   return result?.reservedQuantity ?? 0;
 }
 
-async function lockEquipmentInventory(
+export async function lockEquipmentInventory(
   equipmentId: Types.ObjectId,
   session: ClientSession,
 ): Promise<void> {

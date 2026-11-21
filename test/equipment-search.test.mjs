@@ -15,6 +15,8 @@ import {
 
 process.env.NODE_ENV = "test";
 process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/varax-search-tests";
+process.env.STRIPE_SECRET_KEY = "sk_test_varax_search_tests";
+process.env.STRIPE_WEBHOOK_SECRET = "whsec_varax_search_tests";
 process.env.CLIENT_URL = "http://localhost:3000";
 process.env.JWT_ISSUER = "http://localhost:3000";
 process.env.JWT_AUDIENCE = "varax-api";

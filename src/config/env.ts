@@ -11,6 +11,14 @@ const environmentSchema = z
       .string()
       .trim()
       .min(1, "MONGODB_URI must be configured before the server can start."),
+    STRIPE_SECRET_KEY: z
+      .string()
+      .trim()
+      .regex(/^sk_(test|live)_/, "STRIPE_SECRET_KEY must be a Stripe secret key."),
+    STRIPE_WEBHOOK_SECRET: z
+      .string()
+      .trim()
+      .regex(/^whsec_/, "STRIPE_WEBHOOK_SECRET must be a Stripe webhook secret."),
     CLIENT_URL: z.string().trim().default(""),
     JWT_ISSUER: z.string().trim().url(),
     JWT_AUDIENCE: z.string().trim().min(1),
@@ -34,6 +42,16 @@ const environmentSchema = z
     }
 
     if (values.NODE_ENV === "production") {
+      if (
+        values.CLIENT_URL &&
+        new URL(values.CLIENT_URL).protocol !== "https:"
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["CLIENT_URL"],
+          message: "CLIENT_URL must use HTTPS in production.",
+        });
+      }
       for (const [key, value] of [
         ["JWT_ISSUER", values.JWT_ISSUER],
         ["JWKS_URL", values.JWKS_URL],

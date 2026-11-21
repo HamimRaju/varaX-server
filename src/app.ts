@@ -11,6 +11,8 @@ import bookingRouter from "./routes/booking.routes.js";
 import equipmentRouter from "./routes/equipment.routes.js";
 import favoriteRouter from "./routes/favorite.routes.js";
 import healthRouter from "./routes/health.routes.js";
+import paymentRouter from "./routes/payment.routes.js";
+import paymentWebhookRouter from "./routes/payment-webhook.routes.js";
 
 const app = express();
 
@@ -26,6 +28,8 @@ app.use(
   }),
 );
 app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+// Stripe signature verification requires the untouched raw request body.
+app.use("/api/payments/webhook", paymentWebhookRouter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -34,6 +38,7 @@ app.use("/api/bookings", bookingRouter);
 app.use("/api/equipment", equipmentRouter);
 app.use("/api/admin/equipment", adminEquipmentRouter);
 app.use("/api/favorites", favoriteRouter);
+app.use("/api/payments", paymentRouter);
 if (env.NODE_ENV !== "production") {
   app.use("/api/test", authTestRouter);
 }
