@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import mongoose, { Types, type ClientSession } from "mongoose";
 import { Booking } from "../models/Booking.js";
 import { Equipment } from "../models/Equipment.js";
+import { Payment } from "../models/Payment.js";
 import type {
   BookingStatus,
+  BookingPaymentStatus,
   RentalType,
 } from "../models/types.js";
 import type { AuthenticatedUser } from "../types/authenticated-user.js";
@@ -26,6 +28,13 @@ const POPULATED_EQUIPMENT_FIELDS =
   "_id name image category location rentalType price availableQuantity";
 
 type DateRange = Pick<AvailabilityInput, "startDate" | "endDate">;
+
+export interface CustomerBookingListOptions {
+  status?: BookingStatus;
+  paymentStatus?: BookingPaymentStatus;
+  sort?: "newest" | "oldest";
+  includePaymentSummary?: boolean;
+}
 
 function notFound(): never {
   throw new HttpError(404, "Booking or equipment not found.");
@@ -413,22 +422,75 @@ export async function getEquipmentAvailability(
 export async function listCustomerBookings(
   customerId: Types.ObjectId,
   pagination: BookingPagination,
+  options: CustomerBookingListOptions = {},
 ) {
-  const filter = { customerId };
+  const filter = {
+    customerId,
+    ...(options.status ? { bookingStatus: options.status } : {}),
+    ...(options.paymentStatus ? { paymentStatus: options.paymentStatus } : {}),
+  };
   const skip = (pagination.page - 1) * pagination.limit;
+  const direction = options.sort === "oldest" ? 1 : -1;
   const [bookings, totalItems] = await Promise.all([
     Booking.find(filter)
       .populate({ path: "equipmentId", select: POPULATED_EQUIPMENT_FIELDS })
       .populate({ path: "ownerId", select: "_id name image" })
-      .sort({ createdAt: -1, _id: -1 })
+      .sort({ createdAt: direction, _id: direction })
       .skip(skip)
       .limit(pagination.limit)
       .lean()
       .exec(),
     Booking.countDocuments(filter).exec(),
   ]);
+
+  let paymentByBookingId = new Map<string, any>();
+  if (options.includePaymentSummary && bookings.length > 0) {
+    const bookingIds = bookings.map((booking: any) => booking._id);
+    const payments = await Payment.find({
+      customerId,
+      bookingId: { $in: bookingIds },
+    })
+      .select(
+        "bookingId amount amountMinorUnits currency paymentStatus paymentMethod paidAt fulfillmentStatus createdAt",
+      )
+      .sort({ createdAt: -1, _id: -1 })
+      .lean()
+      .exec();
+    paymentByBookingId = new Map();
+    for (const payment of payments) {
+      const key = payment.bookingId.toString();
+      if (!paymentByBookingId.has(key)) {
+        paymentByBookingId.set(key, payment);
+      }
+    }
+  }
+
+  const serializedBookings = bookings.map((booking: any) => {
+    const result = toBookingDto(booking);
+    if (!options.includePaymentSummary) return result;
+    const payment = paymentByBookingId.get(booking._id.toString());
+    result.paymentSummary = payment
+      ? {
+          amount: payment.amount,
+          amountMinorUnits: payment.amountMinorUnits,
+          currency: payment.currency ?? "bdt",
+          status: payment.paymentStatus,
+          paidAt: payment.paidAt ?? null,
+          paymentMethod: payment.paymentMethod ?? null,
+          fulfillmentStatus: payment.fulfillmentStatus,
+        }
+      : {
+          amount: booking.totalAmount,
+          currency: "bdt",
+          status: booking.paymentStatus ?? "unpaid",
+          paidAt: null,
+          paymentMethod: null,
+        };
+    return result;
+  });
+
   return {
-    bookings: bookings.map(toBookingDto),
+    bookings: serializedBookings,
     pagination: makePagination(
       pagination.page,
       pagination.limit,

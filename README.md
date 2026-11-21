@@ -442,3 +442,146 @@ window.location.assign(result.data.url);
 
 After Stripe redirects back, use the authenticated
 `GET /api/payments/${bookingId}/status` response for the displayed outcome.
+
+## Customer dashboard APIs
+
+Every customer dashboard endpoint requires `Authorization: Bearer <token>`,
+`verifyToken`, and the `customer` role (`verifyRenter`). Owner and admin tokens
+receive `403`; the customer ID is always taken from the verified database-backed
+identity.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/customer/dashboard/overview` | Customer booking, favorite, spending, and recent-booking summary |
+| `GET /api/customer/dashboard/bookings` | Filtered and paginated booking history |
+| `GET /api/customer/dashboard/favorites` | Paged favorites using the existing favorite aggregation |
+| `GET /api/customer/dashboard/profile` | Safe customer profile |
+| `PATCH /api/customer/dashboard/profile` | Update name, profile image, and/or phone |
+| `GET /api/customer/dashboard/activity` | Paged recent booking-created and payment-completed events |
+
+### Overview and calculations
+
+`GET /api/customer/dashboard/overview` returns `totalBookings`,
+`pendingBookings`, `confirmedBookings`, `activeRentals`, `completedRentals`,
+`cancelledBookings`, `totalFavorites`, `totalSpent`, and the latest five
+`recentBookings` with basic equipment details.
+
+- `totalBookings` includes every booking status, including rejected bookings.
+- The status counters count exact statuses; active rentals are not included in
+  `confirmedBookings`.
+- `totalFavorites` follows the existing Favorites API and includes only
+  approved, non-deleted equipment.
+- `totalSpent` sums each unique paid Payment once, using the PaymentIntent ID
+  (or Payment record ID if absent), and verifies its booking belongs to this
+  customer. Pending, failed, and refunded payments are excluded. Amounts are
+  reported in the Payment model's major currency units.
+- `recentBookings` are sorted by booking `createdAt`, newest first.
+
+Example overview response:
+
+```json
+{
+  "success": true,
+  "message": "Customer dashboard data fetched successfully.",
+  "data": {
+    "totalBookings": 4,
+    "pendingBookings": 1,
+    "confirmedBookings": 1,
+    "activeRentals": 1,
+    "completedRentals": 1,
+    "cancelledBookings": 0,
+    "totalFavorites": 2,
+    "totalSpent": 12500,
+    "recentBookings": []
+  }
+}
+```
+
+### Booking history and favorites
+
+`GET /api/customer/dashboard/bookings` supports:
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `page` | Positive integer | `1` |
+| `limit` | Integer from 1 to 50 | `10` |
+| `status` | Booking status enum | No filter |
+| `paymentStatus` | `unpaid`, `paid`, `failed`, or `refunded` | No filter |
+| `sort` | `newest` or `oldest` | `newest` |
+
+History results include equipment details and a safe `paymentSummary` (amount,
+currency, status, paid date, payment method, and fulfillment state where
+available). They do not include Stripe objects or credentials. Filters,
+sorting, pagination, and counts are applied in MongoDB.
+
+Example history response:
+
+```json
+{
+  "success": true,
+  "message": "Customer bookings fetched successfully.",
+  "data": [
+    {
+      "_id": "64a1b2c3d4e5f67890123457",
+      "equipmentId": {
+        "_id": "64a1b2c3d4e5f67890123456",
+        "name": "Canon EOS R6",
+        "image": "https://images.example.test/camera.jpg"
+      },
+      "status": "confirmed",
+      "paymentStatus": "paid",
+      "paymentSummary": {
+        "amount": 1000,
+        "currency": "bdt",
+        "status": "paid",
+        "paidAt": "2026-11-22T10:00:00.000Z",
+        "paymentMethod": "card"
+      }
+    }
+  ],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 1,
+    "totalItems": 1,
+    "limit": 10,
+    "hasNextPage": false,
+    "hasPrevPage": false
+  }
+}
+```
+
+`GET /api/customer/dashboard/favorites?page=1&limit=9` uses the existing
+Favorites aggregation and returns only approved, non-deleted equipment with
+card details and pagination metadata. The default page size is `9`, maximum
+`50`.
+
+### Profile and activity
+
+The profile response contains only `id`, `name`, `email`, `image`, `phone`,
+`role`, and `createdAt`. Email is read-only because email changes must go
+through Better Auth's verification flow. Profile updates accept only `name`,
+`image`, and `phone`; role, IDs, email, account status, and email-verification
+fields are rejected. Empty `image` or `phone` values clear those optional
+fields.
+
+Example update:
+
+```http
+PATCH /api/customer/dashboard/profile
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{ "name": "Alex Rahman", "phone": "+8801712345678" }
+```
+
+The activity feed is reconstructed from persisted timestamps without a new
+activity collection. It currently includes only `booking_created` (`Booking.createdAt`)
+and `payment_completed` (`Payment.paidAt`) events tied to bookings owned by the
+customer. Confirmation, cancellation,
+and rental-completion activity is omitted because the system does not store
+separate reliable timestamps for those status transitions; `updatedAt` is not
+used as a substitute. Activity supports `page` (default `1`) and `limit`
+(default `10`, maximum `50`) and is sorted newest first. The `$unionWith`
+aggregation requires MongoDB 4.4 or later.

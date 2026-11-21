@@ -150,6 +150,19 @@ bookingSchema.index({ equipmentId: 1 });
 bookingSchema.index({ bookingStatus: 1 });
 bookingSchema.index({ paymentStatus: 1 });
 bookingSchema.index({ startDate: 1, endDate: 1 });
+bookingSchema.index({ customerId: 1, createdAt: -1, _id: -1 });
+bookingSchema.index({
+  customerId: 1,
+  bookingStatus: 1,
+  createdAt: -1,
+  _id: -1,
+});
+bookingSchema.index({
+  customerId: 1,
+  paymentStatus: 1,
+  createdAt: -1,
+  _id: -1,
+});
 bookingSchema.index({
   equipmentId: 1,
   bookingStatus: 1,
