@@ -110,3 +110,47 @@ message and pagination metadata:
   }
 }
 ```
+
+## Favorites
+
+All Favorites endpoints require `Authorization: Bearer <token>` and the
+authenticated `customer` role.
+
+- `POST /api/favorites/:equipmentId` — add an approved, non-deleted listing.
+- `GET /api/favorites?page=1&limit=9` — list the customer's visible favorite
+  equipment, with populated card fields.
+- `DELETE /api/favorites/:equipmentId` — remove only the customer's favorite.
+
+Pagination defaults to page `1` and limit `9`; the maximum limit is `50`.
+Equipment no longer approved or soft-deleted is excluded from the list.
+
+Example:
+
+```http
+POST /api/favorites/64a1b2c3d4e5f67890123456
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "success": true,
+  "message": "Equipment added to favorites.",
+  "data": {
+    "equipmentId": "64a1b2c3d4e5f67890123456",
+    "createdAt": "2026-11-21T12:00:00.000Z"
+  }
+}
+```
+
+`GET /api/favorites` returns `data` entries containing the favorite ID,
+`createdAt`, and an `equipmentId` object with `_id`, `name`, `image`, `category`,
+`location`, `price`, `rentalType`, `availableQuantity`, and `available`. The
+response includes the same pagination metadata as the equipment listing.
+
+Invalid IDs or pagination return `400`; missing/invalid authentication returns
+`401`; non-customers return `403`; unavailable equipment or a missing favorite
+returns `404`; duplicate favorites return `409`.
+
+The Step 02 Favorite collection used `customerId`. Existing documents remain
+supported; new favorites use `userId` and retain `customerId` for the existing
+unique index during the transition.
