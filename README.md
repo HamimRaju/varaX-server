@@ -24,7 +24,7 @@ clear error if `MONGODB_URI` is missing or the database cannot be reached.
 - `npm run dev` — run the server with `tsx` watch mode.
 - `npm run typecheck` — type-check without emitting files.
 - `npm run build` — compile TypeScript into `dist/`.
-- `npm test` — build and run the Node.js equipment-search tests.
+- `npm test` — build and run the Node.js API/service tests.
 - `npm start` — run the compiled server.
 
 ## Health check
@@ -154,3 +154,133 @@ returns `404`; duplicate favorites return `409`.
 The Step 02 Favorite collection used `customerId`. Existing documents remain
 supported; new favorites use `userId` and retain `customerId` for the existing
 unique index during the transition.
+
+## Bookings and availability
+
+Customer booking endpoints require a bearer token and the `customer` role.
+Owner request/status endpoints require the `owner` role. Booking details allow
+the customer who placed the booking, the equipment owner, or an admin.
+
+| Method and path | Role | Purpose |
+| --- | --- | --- |
+| `POST /api/bookings` | Customer | Create an unpaid booking request |
+| `GET /api/bookings/my-bookings?page=1&limit=9` | Customer | List only the current customer's bookings |
+| `GET /api/bookings/:id` | Customer, owner, or admin | Read an authorized booking |
+| `PATCH /api/bookings/:id/cancel` | Customer | Cancel the current customer's eligible booking |
+| `GET /api/bookings/owner/requests?status=pending&page=1&limit=9` | Owner | List only this owner's requests; `status` is optional |
+| `PATCH /api/bookings/:id/status` | Owner | Confirm, reject, activate, or complete an eligible booking |
+| `GET /api/equipment/:id/availability?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&quantity=1` | Public | Check date-specific availability |
+
+All booking list endpoints default to page `1` and limit `9`; the maximum
+limit is `50`. Owner request status filters accept `pending`, `confirmed`,
+`active`, `completed`, `cancelled`, and `rejected`.
+
+Example create request:
+
+```http
+POST /api/bookings
+Authorization: Bearer <customer-token>
+Idempotency-Key: booking-request-2026-12-01-01
+Content-Type: application/json
+```
+
+```json
+{
+  "equipmentId": "64a1b2c3d4e5f67890123456",
+  "startDate": "2026-12-01",
+  "endDate": "2026-12-05",
+  "quantity": 1,
+  "contactNumber": "01XXXXXXXXX",
+  "deliveryAddress": "Dhaka, Bangladesh",
+  "notes": "Please contact before delivery"
+}
+```
+
+The server derives customer and owner IDs, rental type, and price from trusted
+records. Client-supplied pricing, status, payment, duration, and identity fields
+are ignored. A new request is `pending` and `unpaid`; the response includes
+`pricePerUnit`, `rentalDuration`, `subtotal`, and `totalAmount` snapshots. No
+Stripe checkout, payment confirmation, or refund handling is implemented in
+this step. Reusing the optional `Idempotency-Key` with the same request returns
+the existing booking; reusing it with different data returns `409`.
+
+Example response (`201 Created`):
+
+```json
+{
+  "success": true,
+  "message": "Booking request created. Payment is required before confirmation.",
+  "data": {
+    "_id": "64a1b2c3d4e5f67890123457",
+    "equipmentId": "64a1b2c3d4e5f67890123456",
+    "quantity": 1,
+    "rentalType": "daily",
+    "pricePerUnit": 250,
+    "rentalDuration": 4,
+    "subtotal": 1000,
+    "totalAmount": 1000,
+    "status": "pending",
+    "paymentStatus": "unpaid"
+  }
+}
+```
+
+Example availability response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "availableQuantity": 5,
+    "reservedQuantity": 2,
+    "remainingQuantity": 3,
+    "requestedQuantity": 1,
+    "isAvailable": true
+  }
+}
+```
+
+Availability uses the half-open date range
+`existing.startDate < requested.endDate AND existing.endDate > requested.startDate`.
+Only `confirmed` and `active` bookings reserve inventory. Pending unpaid requests,
+cancelled, rejected, and completed bookings do not. The stored
+`availableQuantity` is never decremented; remaining quantity is the stored
+quantity less overlapping reservations.
+
+### Booking lifecycle
+
+- Creation starts at `pending` / `unpaid`.
+- An owner can confirm only a `paid` pending booking. The Stripe workflow that
+  will set payment state is Step 09 and is intentionally not part of this API.
+- An owner may reject only an unpaid pending booking and must provide a reason.
+- A confirmed booking may become `active` during its rental dates; an active
+  booking may become `completed` after its end date.
+- A customer may cancel a pending booking or a confirmed booking before its
+  start date. Cancellation does not change `paymentStatus`; refunds belong to
+  the later payment workflow.
+
+Invalid status transitions return `409`. Equipment ownership is checked from
+the database, and customer/owner lists are scoped to the authenticated user.
+Populated user data is limited to a name and optional image.
+
+### Rental pricing and concurrency
+
+Rental dates are UTC `YYYY-MM-DD` values and the end date is exclusive. Daily
+rentals charge for each calendar day. Weekly rentals round any partial
+seven-day period up to one full week. Monthly rentals round up by calendar-month
+anniversaries, clamping an anniversary to the last day of shorter months.
+`subtotal = pricePerUnit × rentalDuration × quantity`; `totalAmount` currently
+equals subtotal because no tax/fee policy exists. These rules are server-side
+and the unit price is snapshotted at booking time.
+
+MongoDB transactions are required for booking creation and status/cancellation
+operations. Each transaction writes an inventory version field on the shared
+equipment document before checking or changing reserving bookings. This write
+serializes transactions for one equipment record and prevents two concurrent
+confirmations from both consuming the same remaining quantity. The field is
+only a concurrency marker; it does not decrement `availableQuantity`.
+
+MongoDB must run as a replica set or sharded cluster with transaction support.
+Standalone MongoDB deployments receive `503` for transaction-dependent booking
+operations; the server deliberately does not use a process-local lock or an
+unsafe fallback. Configure a replica set before enabling booking writes.

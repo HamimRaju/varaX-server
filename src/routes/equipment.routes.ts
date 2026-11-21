@@ -11,6 +11,7 @@ import {
   listPublicEquipment,
   updateMyEquipment,
 } from "../controllers/equipment.controller.js";
+import { getEquipmentAvailability } from "../controllers/booking.controller.js";
 
 const equipmentRouter = Router();
 
@@ -30,6 +31,7 @@ equipmentRouter.get(
   verifyOwner,
   listMyEquipment,
 );
+equipmentRouter.get("/:id/availability", getEquipmentAvailability);
 equipmentRouter.get("/:id", optionalVerifyToken, getEquipmentDetails);
 equipmentRouter.patch(
   "/:id",

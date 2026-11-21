@@ -18,13 +18,23 @@ export interface BookingFields {
   contactNumber: string;
   deliveryAddress: string;
   additionalNotes?: string;
+  notes?: string;
   rentalType: RentalType;
   /** Price captured when the booking is created; independent of current equipment price. */
   unitPrice: number;
+  pricePerUnit?: number;
+  /** Number of daily, weekly, or monthly billing periods. */
+  rentalDuration?: number;
+  subtotal?: number;
   totalAmount: number;
   bookingStatus?: BookingStatus;
+  status?: BookingStatus;
   paymentStatus?: BookingPaymentStatus;
   stripeSessionId?: string;
+  idempotencyKey?: string;
+  requestFingerprint?: string;
+  rejectionReason?: string;
+  cancellationReason?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -59,7 +69,7 @@ const bookingSchema = new Schema<BookingFields>(
     },
     contactNumber: { type: String, required: true, trim: true },
     deliveryAddress: { type: String, required: true, trim: true },
-    additionalNotes: { type: String, trim: true },
+    additionalNotes: { type: String, trim: true, alias: "notes" },
     rentalType: {
       type: String,
       required: true,
@@ -69,9 +79,28 @@ const bookingSchema = new Schema<BookingFields>(
       type: Number,
       required: true,
       min: [0.01, "Unit price must be greater than zero."],
+      alias: "pricePerUnit",
       validate: {
         validator: Number.isFinite,
         message: "Unit price must be a finite number.",
+      },
+    },
+    rentalDuration: {
+      type: Number,
+      min: [1, "Rental duration must be at least one billing period."],
+      validate: {
+        validator: (value: number | undefined) =>
+          value === undefined || Number.isInteger(value),
+        message: "Rental duration must be a whole number of billing periods.",
+      },
+    },
+    subtotal: {
+      type: Number,
+      min: [0.01, "Subtotal must be greater than zero."],
+      validate: {
+        validator: (value: number | undefined) =>
+          value === undefined || Number.isFinite(value),
+        message: "Subtotal must be a finite number.",
       },
     },
     totalAmount: {
@@ -87,6 +116,7 @@ const bookingSchema = new Schema<BookingFields>(
       type: String,
       enum: BOOKING_STATUSES,
       default: "pending",
+      alias: "status",
     },
     paymentStatus: {
       type: String,
@@ -94,6 +124,10 @@ const bookingSchema = new Schema<BookingFields>(
       default: "unpaid",
     },
     stripeSessionId: { type: String, trim: true },
+    idempotencyKey: { type: String, trim: true, maxlength: 128 },
+    requestFingerprint: { type: String, select: false },
+    rejectionReason: { type: String, trim: true, maxlength: 1000 },
+    cancellationReason: { type: String, trim: true, maxlength: 1000 },
   },
   { timestamps: true, collection: "bookings" },
 );
@@ -114,6 +148,20 @@ bookingSchema.index({ equipmentId: 1 });
 bookingSchema.index({ bookingStatus: 1 });
 bookingSchema.index({ paymentStatus: 1 });
 bookingSchema.index({ startDate: 1, endDate: 1 });
+bookingSchema.index({
+  equipmentId: 1,
+  bookingStatus: 1,
+  startDate: 1,
+  endDate: 1,
+});
+bookingSchema.index(
+  { customerId: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { idempotencyKey: { $type: "string" } },
+    name: "bookings_customer_idempotency_uidx",
+  },
+);
 
 export const Booking =
   (mongoose.models.Booking as Model<BookingFields> | undefined) ??

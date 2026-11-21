@@ -22,6 +22,8 @@ export interface EquipmentFields {
   image: string;
   terms?: string;
   ownerId: Types.ObjectId;
+  /** Incremented transactionally to serialize inventory-changing operations. */
+  reservationVersion?: number;
   status?: EquipmentStatus;
   isDeleted?: boolean;
   createdAt?: Date;
@@ -70,6 +72,11 @@ const equipmentSchema = new Schema<EquipmentFields>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+    },
+    reservationVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     status: {
       type: String,
