@@ -46,16 +46,24 @@ Keep real credentials in the ignored `.env` file and never commit them.
 Express will verify Better Auth's asymmetric signing keys through JWKS; it does
 not need Better Auth's secret or a separate shared JWT secret.
 
-## Model and Better Auth integration notes
+## Model and Better Auth integration
 
-The Mongoose user model explicitly uses the `users` collection. When Better Auth
-is added, configure its user `modelName` as `users` so it shares that collection
-instead of creating a separate default `user` collection. Use MongoDB-generated
-ObjectIds (`advanced.database.generateId: false`) so Better Auth user IDs remain
-compatible with the domain models' ObjectId references.
+The Mongoose user model and Better Auth both use the `users` collection. Better
+Auth uses MongoDB-generated ObjectIds (`advanced.database.generateId: false`) so
+user IDs remain compatible with the domain models' ObjectId references.
 
-Define Better Auth's `role` and `isActive` additional fields with
-`input: false`; this prevents public signup input from setting privileged values.
-Give them defaults of `customer` and `true`, respectively. Authentication account
-and session collections remain Better Auth's responsibility; this project does
-not define credential or password fields on `User`.
+Better Auth's `role` and `isActive` additional fields are server-owned and
+default to `customer` and `true`. Authentication accounts and sessions remain
+Better Auth's responsibility; the application User model does not store passwords.
+
+## Temporary authorization smoke routes
+
+In development and test environments only, these routes exercise the middleware:
+
+- `GET /api/test/customer`
+- `GET /api/test/owner`
+- `GET /api/test/admin`
+
+Retrieve an access token from Better Auth's `/api/auth/token` endpoint (or
+`authClient.token()`) and send it as `Authorization: Bearer <token>`. These test
+routes are not mounted in production.
