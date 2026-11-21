@@ -12,13 +12,12 @@ const environmentSchema = z
       .trim()
       .min(1, "MONGODB_URI must be configured before the server can start."),
     CLIENT_URL: z.string().trim().default(""),
-    JWT_SECRET: z.string().default(""),
+    JWT_ISSUER: z.string().trim().url(),
+    JWT_AUDIENCE: z.string().trim().min(1),
+    JWKS_URL: z.string().trim().url(),
   })
   .superRefine((values, context) => {
-    if (
-      values.CLIENT_URL &&
-      !URL.canParse(values.CLIENT_URL)
-    ) {
+    if (values.CLIENT_URL && !URL.canParse(values.CLIENT_URL)) {
       context.addIssue({
         code: "custom",
         path: ["CLIENT_URL"],
@@ -32,6 +31,21 @@ const environmentSchema = z
         path: ["CLIENT_URL"],
         message: "CLIENT_URL is required in production.",
       });
+    }
+
+    if (values.NODE_ENV === "production") {
+      for (const [key, value] of [
+        ["JWT_ISSUER", values.JWT_ISSUER],
+        ["JWKS_URL", values.JWKS_URL],
+      ] as const) {
+        if (new URL(value).protocol !== "https:") {
+          context.addIssue({
+            code: "custom",
+            path: [key],
+            message: `${key} must use HTTPS in production.`,
+          });
+        }
+      }
     }
   });
 

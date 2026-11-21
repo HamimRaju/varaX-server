@@ -38,9 +38,13 @@ clear error if `MONGODB_URI` is missing or the database cannot be reached.
 | `NODE_ENV` | `development`, `test`, or `production` |
 | `MONGODB_URI` | Required MongoDB connection string |
 | `CLIENT_URL` | Frontend origin allowed by CORS; required in production |
-| `JWT_SECRET` | Reserved for a later authentication step |
+| `JWT_ISSUER` | Must match the issuer configured in Better Auth |
+| `JWT_AUDIENCE` | Must match the audience configured in Better Auth |
+| `JWKS_URL` | Better Auth's public JWKS endpoint, normally `/api/auth/jwks` |
 
 Keep real credentials in the ignored `.env` file and never commit them.
+Express will verify Better Auth's asymmetric signing keys through JWKS; it does
+not need Better Auth's secret or a separate shared JWT secret.
 
 ## Model and Better Auth integration notes
 

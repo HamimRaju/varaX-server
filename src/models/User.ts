@@ -38,7 +38,7 @@ const userSchema = new Schema<UserFields>(
   { timestamps: true, collection: "users" },
 );
 
-userSchema.index({ email: 1 }, { unique: true, name: "users_email_unique" });
+userSchema.index({ email: 1 }, { unique: true, name: "users_email_uidx" });
 
 // Configure Better Auth with user.modelName: "users" to share this collection,
 // and keep its user IDs as MongoDB ObjectIds for the other models' ObjectId refs.
