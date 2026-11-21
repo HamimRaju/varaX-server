@@ -41,3 +41,17 @@ clear error if `MONGODB_URI` is missing or the database cannot be reached.
 | `JWT_SECRET` | Reserved for a later authentication step |
 
 Keep real credentials in the ignored `.env` file and never commit them.
+
+## Model and Better Auth integration notes
+
+The Mongoose user model explicitly uses the `users` collection. When Better Auth
+is added, configure its user `modelName` as `users` so it shares that collection
+instead of creating a separate default `user` collection. Use MongoDB-generated
+ObjectIds (`advanced.database.generateId: false`) so Better Auth user IDs remain
+compatible with the domain models' ObjectId references.
+
+Define Better Auth's `role` and `isActive` additional fields with
+`input: false`; this prevents public signup input from setting privileged values.
+Give them defaults of `customer` and `true`, respectively. Authentication account
+and session collections remain Better Auth's responsibility; this project does
+not define credential or password fields on `User`.
