@@ -112,13 +112,10 @@ function stripeErrorSummary(error: unknown) {
   const value = error as {
     type?: unknown;
     code?: unknown;
-    requestId?: unknown;
   };
   return {
     type: typeof value.type === "string" ? value.type : "unknown",
     code: typeof value.code === "string" ? value.code : "unknown",
-    requestId:
-      typeof value.requestId === "string" ? value.requestId : undefined,
   };
 }
 
@@ -549,6 +546,136 @@ export async function getPaymentStatus(
   return paymentStatusDto(booking, payment);
 }
 
+/**
+ * Development-only payment simulation. It records a paid payment for a pending
+ * booking without contacting Stripe. Production startup rejects this mode.
+ */
+export async function completeDemoPayment(
+  rawBookingId: unknown,
+  customer: AuthenticatedUser,
+) {
+  if (!(rawBookingId instanceof Types.ObjectId)) {
+    throw new HttpError(400, "bookingId must be a valid ObjectId.");
+  }
+  const bookingId = rawBookingId;
+
+  return inTransaction(async (session) => {
+    const booking = await Booking.findOne({
+      _id: bookingId,
+      customerId: customer.id,
+    })
+      .session(session)
+      .exec();
+    if (!booking) {
+      throw new HttpError(404, "Booking not found.");
+    }
+
+    if (booking.paymentStatus === "paid") {
+      const paidPayment = await Payment.findOne({ bookingId })
+        .sort({ createdAt: -1 })
+        .session(session)
+        .lean()
+        .exec();
+      return paymentStatusDto(booking.toObject({ virtuals: false }), paidPayment);
+    }
+
+    if (booking.bookingStatus !== "pending") {
+      throw new HttpError(409, "Only pending bookings can be paid.");
+    }
+    if (
+      booking.paymentStatus !== "unpaid" &&
+      booking.paymentStatus !== "failed"
+    ) {
+      throw new HttpError(409, "This booking is not awaiting payment.");
+    }
+
+    const amountMinorUnits = toMinorUnits(booking.totalAmount);
+    const paidAt = new Date();
+    const existingPayment = await Payment.findOne({ bookingId })
+      .sort({ createdAt: -1 })
+      .session(session)
+      .exec();
+
+    let payment;
+    if (existingPayment) {
+      existingPayment.set({
+        stripeSessionId: existingPayment.stripeSessionId.startsWith(
+          PLACEHOLDER_SESSION_PREFIX,
+        )
+          ? `demo_${randomUUID()}`
+          : existingPayment.stripeSessionId,
+        amount: Number(booking.totalAmount.toFixed(2)),
+        amountMinorUnits,
+        currency: STRIPE_CURRENCY,
+        paymentStatus: "paid",
+        fulfillmentStatus: "fulfilled",
+        paymentMethod: "demo",
+        paidAt,
+      });
+      await existingPayment.save({ session });
+      await Payment.updateOne(
+        { _id: existingPayment._id },
+        { $unset: { activeBookingId: 1, checkoutUrl: 1 } },
+        { session },
+      );
+      payment = existingPayment;
+    } else {
+      const [createdPayment] = await Payment.create(
+        [
+          {
+            bookingId,
+            customerId: booking.customerId,
+            ownerId: booking.ownerId,
+            equipmentId: booking.equipmentId,
+            stripeSessionId: `demo_${randomUUID()}`,
+            checkoutAttemptId: randomUUID(),
+            amount: Number(booking.totalAmount.toFixed(2)),
+            amountMinorUnits,
+            currency: STRIPE_CURRENCY,
+            paymentStatus: "paid",
+            fulfillmentStatus: "fulfilled",
+            paymentMethod: "demo",
+            paidAt,
+            stripeEventIds: [],
+          },
+        ],
+        { session },
+      );
+      if (!createdPayment) {
+        throw new HttpError(500, "Demo payment could not be recorded.");
+      }
+      payment = createdPayment;
+    }
+
+    const updated = await Booking.updateOne(
+      {
+        _id: bookingId,
+        customerId: customer.id,
+        bookingStatus: "pending",
+        paymentStatus: { $in: ["unpaid", "failed"] },
+      },
+      { $set: { paymentStatus: "paid" } },
+    )
+      .session(session)
+      .exec();
+    if (updated.matchedCount !== 1) {
+      throw new HttpError(409, "Booking changed while payment was being recorded.");
+    }
+
+    const updatedBooking = await Booking.findById(bookingId)
+      .session(session)
+      .lean()
+      .exec();
+    if (!updatedBooking) {
+      throw new HttpError(500, "Booking could not be reloaded.");
+    }
+    return paymentStatusDto(
+      updatedBooking,
+      payment.toObject({ virtuals: false }),
+    );
+  });
+}
+
 function getSessionPaymentIntentId(
   session: Stripe.Checkout.Session,
 ): string | undefined {
@@ -652,8 +779,6 @@ async function recordUnmatchedPaidSession(
   const [payment] = await Payment.create([paymentData], { session });
   if (!payment) return undefined;
   console.error("Paid Checkout Session had no payment record; refund recovery started.", {
-    eventId,
-    sessionId: sessionObject.id,
     paymentId: payment._id.toString(),
     bookingId,
   });
@@ -751,10 +876,7 @@ async function processPaidCheckoutSession(
           return { matched: true as const, ...recovery };
         }
       }
-      console.error("Paid Checkout Session has no matching payment record.", {
-        eventId,
-        sessionId: sessionObject.id,
-      });
+      console.error("Paid Checkout Session has no matching payment record.");
       return { matched: false as const };
     }
 
@@ -771,8 +893,6 @@ async function processPaidCheckoutSession(
     }
     if (!sessionMatchesPayment(sessionObject, payment)) {
       console.error("Checkout Session metadata does not match its payment record.", {
-        eventId,
-        sessionId: sessionObject.id,
         paymentId: payment._id.toString(),
       });
       await Payment.updateOne(
@@ -955,17 +1075,12 @@ async function markCheckoutSessionFailed(
       session,
     );
     if (!payment) {
-      console.warn("Expired or failed Checkout Session has no payment record.", {
-        eventId,
-        sessionId: sessionObject.id,
-      });
+      console.warn("Expired or failed Checkout Session has no payment record.");
       return;
     }
     if (payment.stripeEventIds?.includes(eventId)) return;
     if (!sessionMatchesPayment(sessionObject, payment)) {
       console.error("Failed Checkout Session does not match its payment record.", {
-        eventId,
-        sessionId: sessionObject.id,
         paymentId: payment._id.toString(),
       });
       await Payment.updateOne(
@@ -1039,10 +1154,7 @@ async function markPaymentIntentFailed(
       }
     }
     if (!payment) {
-      console.warn("Failed PaymentIntent has no matching payment record.", {
-        eventId,
-        paymentIntentId: paymentIntent.id,
-      });
+      console.warn("Failed PaymentIntent has no matching payment record.");
       return;
     }
     if (payment.stripeEventIds?.includes(eventId)) return;
@@ -1059,8 +1171,6 @@ async function markPaymentIntentFailed(
         payment.stripePaymentIntentId !== paymentIntent.id)
     ) {
       console.error("PaymentIntent failure does not match its payment record.", {
-        eventId,
-        paymentIntentId: paymentIntent.id,
         paymentId: payment._id.toString(),
       });
       await Payment.updateOne(

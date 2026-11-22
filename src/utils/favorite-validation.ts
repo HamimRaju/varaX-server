@@ -17,7 +17,16 @@ const favoritePaginationSchema = z
       .optional()
       .transform((value) => value ?? 9),
   })
-  .strict();
+  .strict()
+  .superRefine(({ page, limit }, context) => {
+    if (!Number.isSafeInteger((page - 1) * limit)) {
+      context.addIssue({
+        code: "custom",
+        path: ["page"],
+        message: "Page is too large.",
+      });
+    }
+  });
 
 export interface FavoritePaginationQuery {
   page: number;

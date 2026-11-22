@@ -9,7 +9,7 @@ import {
 const nonNegativePriceQuery = z
   .string()
   .trim()
-  .min(1)
+  .regex(/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/, "Must be a valid price.")
   .transform(Number)
   .pipe(z.number().finite().min(0));
 
@@ -61,6 +61,13 @@ const equipmentSearchQuerySchema = z
         code: "custom",
         path: ["maxPrice"],
         message: "maxPrice must be greater than or equal to minPrice.",
+      });
+    }
+    if (!Number.isSafeInteger((query.page - 1) * query.limit)) {
+      context.addIssue({
+        code: "custom",
+        path: ["page"],
+        message: "Page is too large.",
       });
     }
   });

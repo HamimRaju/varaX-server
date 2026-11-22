@@ -939,6 +939,151 @@ test("admin APIs reject unauthenticated users, customers, and owners", async () 
   );
 });
 
+test("expired, wrongly-issued, and incorrectly signed JWTs are rejected", async () => {
+  const expired = await new SignJWT({ role: "admin" })
+    .setProtectedHeader({ alg: "EdDSA", kid: keyId })
+    .setIssuer(authBase)
+    .setAudience("varax-api")
+    .setSubject(ids.admin.toString())
+    .setExpirationTime(Math.floor(Date.now() / 1000) - 10)
+    .sign(privateKey);
+  const wrongIssuer = await new SignJWT({ role: "admin" })
+    .setProtectedHeader({ alg: "EdDSA", kid: keyId })
+    .setIssuer(`${authBase}/wrong`)
+    .setAudience("varax-api")
+    .setSubject(ids.admin.toString())
+    .setExpirationTime("5m")
+    .sign(privateKey);
+  const wrongAudience = await new SignJWT({ role: "admin" })
+    .setProtectedHeader({ alg: "EdDSA", kid: keyId })
+    .setIssuer(authBase)
+    .setAudience("wrong-audience")
+    .setSubject(ids.admin.toString())
+    .setExpirationTime("5m")
+    .sign(privateKey);
+  const otherPair = await generateKeyPair("EdDSA");
+  const badSignature = await new SignJWT({ role: "admin" })
+    .setProtectedHeader({ alg: "EdDSA", kid: keyId })
+    .setIssuer(authBase)
+    .setAudience("varax-api")
+    .setSubject(ids.admin.toString())
+    .setExpirationTime("5m")
+    .sign(otherPair.privateKey);
+
+  for (const token of [expired, wrongIssuer, wrongAudience, badSignature]) {
+    assert.equal(
+      (
+        await apiCall(
+          "GET",
+          "/api/admin/analytics/overview",
+          token,
+        )
+      ).status,
+      401,
+    );
+  }
+});
+
+test("CORS is allowlisted, security headers are present, and 404s omit query strings", async () => {
+  const allowed = await fetch(`${apiBase}/api/health`, {
+    headers: { origin: authBase },
+  });
+  assert.equal(allowed.headers.get("access-control-allow-origin"), authBase);
+  assert.equal(allowed.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(allowed.headers.get("x-powered-by"), null);
+
+  const rejectedOrigin = await fetch(`${apiBase}/api/health`, {
+    headers: { origin: "https://not-allowlisted.example" },
+  });
+  assert.equal(rejectedOrigin.headers.get("access-control-allow-origin"), null);
+
+  const notFound = await fetch(
+    `${apiBase}/api/not-a-route?private=value`,
+  );
+  const errorBody = await notFound.json();
+  assert.equal(notFound.status, 404);
+  assert.deepEqual(errorBody, {
+    success: false,
+    message: "Route not found.",
+  });
+});
+
+test("request body limits and production errors do not reveal internals", async () => {
+  const oversized = await fetch(`${apiBase}/api/bookings`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ payload: "x".repeat(110 * 1024) }),
+  });
+  assert.equal(oversized.status, 413);
+  const oversizedBody = await oversized.json();
+  assert.equal(JSON.stringify(oversizedBody).includes("stack"), false);
+
+  const originalAggregate = models.User.aggregate;
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalConsoleError = console.error;
+  const logMessages = [];
+  Object.defineProperty(models.User, "aggregate", {
+    configurable: true,
+    writable: true,
+    value() {
+      return {
+        async exec() {
+          throw new Error("mongodb://private-user:private-password@db.internal");
+        },
+      };
+    },
+  });
+  process.env.NODE_ENV = "production";
+  console.error = (...args) => logMessages.push(args);
+  try {
+    const response = await apiCall(
+      "GET",
+      "/api/admin/analytics/overview",
+      tokens.admin,
+    );
+    assert.equal(response.status, 500);
+    const body = await response.json();
+    assert.deepEqual(body, {
+      success: false,
+      message: "Internal server error",
+    });
+    assert.equal(JSON.stringify(body).includes("private-password"), false);
+    assert.equal(JSON.stringify(logMessages).includes("private-password"), false);
+    assert.equal(JSON.stringify(logMessages).includes("mongodb://"), false);
+  } finally {
+    process.env.NODE_ENV = originalNodeEnv;
+    console.error = originalConsoleError;
+    Object.defineProperty(models.User, "aggregate", {
+      configurable: true,
+      writable: true,
+      value: originalAggregate,
+    });
+  }
+});
+
+test("checkout endpoint applies an authenticated per-user rate limit", async () => {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const response = await apiCall(
+      "POST",
+      "/api/payments/create-checkout-session",
+      tokens.customer,
+      {},
+    );
+    assert.equal(response.status, 400);
+  }
+  assert.equal(
+    (
+      await apiCall(
+        "POST",
+        "/api/payments/create-checkout-session",
+        tokens.customer,
+        {},
+      )
+    ).status,
+    429,
+  );
+});
+
 test("admin overview counts actual roles and valid non-deleted records", async () => {
   const response = await apiCall(
     "GET",

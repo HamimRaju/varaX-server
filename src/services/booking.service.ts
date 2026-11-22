@@ -262,6 +262,8 @@ function toBookingDto(booking: any) {
   const {
     requestFingerprint: _requestFingerprint,
     idempotencyKey: _idempotencyKey,
+    stripeSessionId: _stripeSessionId,
+    checkoutAttemptVersion: _checkoutAttemptVersion,
     ...safeBooking
   } = value;
   return {

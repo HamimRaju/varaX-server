@@ -225,7 +225,7 @@ function validBody(overrides = {}) {
     startDate: dateOffset(4),
     endDate: dateOffset(6),
     quantity: 1,
-    contactNumber: "01XXXXXXXXX",
+    contactNumber: "01712345678",
     deliveryAddress: "Dhaka, Bangladesh",
     ...overrides,
   };
@@ -638,6 +638,9 @@ test("malformed IDs, dates, past starts, and invalid quantities are rejected", a
     validBody({ quantity: 0 }),
     validBody({ quantity: 1.5 }),
     validBody({ quantity: "2.2" }),
+    validBody({ quantity: true }),
+    validBody({ contactNumber: "call-me-now" }),
+    validBody({ contactNumber: 123456789 }),
   ];
   for (const body of invalidBodies) {
     assert.equal(
@@ -894,7 +897,12 @@ test("transactions fail closed when MongoDB does not support them", async () => 
 });
 
 test("customers see only their own bookings and owner request lists are owner-scoped", async () => {
-  const own = addBooking({ customerId, ownerId });
+  const own = addBooking({
+    customerId,
+    ownerId,
+    stripeSessionId: "cs_sensitive_identifier",
+    checkoutAttemptVersion: 3,
+  });
   addBooking({
     customerId: otherCustomerId,
     ownerId,
@@ -931,14 +939,29 @@ test("customers see only their own bookings and owner request lists are owner-sc
     (await apiCall("GET", `/api/bookings/${own._id}`, tokens.otherOwner)).status,
     404,
   );
-  assert.equal(
-    (await apiCall("GET", `/api/bookings/${own._id}`, tokens.admin)).status,
-    200,
+  const detail = await apiCall(
+    "GET",
+    `/api/bookings/${own._id}`,
+    tokens.admin,
   );
+  assert.equal(detail.status, 200);
+  const detailBody = await detail.json();
+  assert.equal("stripeSessionId" in detailBody.data, false);
+  assert.equal("checkoutAttemptVersion" in detailBody.data, false);
 });
 
 test("owners cannot confirm unpaid bookings and rejected transitions require a reason", async () => {
   const unpaid = addBooking({ paymentStatus: "unpaid", bookingStatus: "pending" });
+  const massAssignment = await apiCall(
+    "PATCH",
+    `/api/bookings/${unpaid._id}/status`,
+    tokens.owner,
+    { status: "confirmed", paymentStatus: "paid" },
+  );
+  assert.equal(massAssignment.status, 400);
+  assert.equal(unpaid.bookingStatus, "pending");
+  assert.equal(unpaid.paymentStatus, "unpaid");
+
   const confirm = await apiCall(
     "PATCH",
     `/api/bookings/${unpaid._id}/status`,

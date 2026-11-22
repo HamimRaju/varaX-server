@@ -108,9 +108,13 @@ export function parseCreateBookingInput(value: unknown): CreateBookingInput {
   if (
     typeof value.contactNumber !== "string" ||
     value.contactNumber.trim().length < 5 ||
-    value.contactNumber.trim().length > 32
+    value.contactNumber.trim().length > 32 ||
+    !/^[+()\d .-]+$/.test(value.contactNumber.trim())
   ) {
-    throw new HttpError(400, "contactNumber is required and must be 5–32 characters.");
+    throw new HttpError(
+      400,
+      "contactNumber must be a 5–32 character phone number.",
+    );
   }
   if (
     typeof value.deliveryAddress !== "string" ||
@@ -147,16 +151,39 @@ function queryString(value: unknown, field: string): string | undefined {
   return value;
 }
 
-export function parseBookingPagination(query: Record<string, unknown>): BookingPagination {
+export function parseBookingPagination(
+  query: Record<string, unknown>,
+  additionalFields: readonly string[] = [],
+): BookingPagination {
+  const allowed = new Set(["page", "limit", ...additionalFields]);
+  const unexpected = Object.keys(query).find((field) => !allowed.has(field));
+  if (unexpected) {
+    throw new HttpError(
+      400,
+      `${unexpected} is not a supported query parameter.`,
+    );
+  }
   const pageValue = queryString(query.page, "page");
   const limitValue = queryString(query.limit, "limit");
   const page = pageValue === undefined ? 1 : Number(pageValue);
   const limit = limitValue === undefined ? 9 : Number(limitValue);
-  if (!Number.isSafeInteger(page) || page < 1) {
+  if (
+    (pageValue !== undefined && !/^\d+$/.test(pageValue)) ||
+    !Number.isSafeInteger(page) ||
+    page < 1
+  ) {
     throw new HttpError(400, "page must be a positive integer.");
   }
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+  if (
+    (limitValue !== undefined && !/^\d+$/.test(limitValue)) ||
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > 50
+  ) {
     throw new HttpError(400, "limit must be an integer between 1 and 50.");
+  }
+  if (!Number.isSafeInteger((page - 1) * limit)) {
+    throw new HttpError(400, "page is too large.");
   }
   return { page, limit };
 }
@@ -177,6 +204,9 @@ export function parseOwnerBookingStatusInput(
 ): OwnerBookingStatusInput {
   if (!isRecord(value)) {
     throw new HttpError(400, "A JSON request body is required.");
+  }
+  if (Object.keys(value).some((field) => field !== "status" && field !== "reason")) {
+    throw new HttpError(400, "Only status and reason may be provided.");
   }
   const status = value.status;
   if (
@@ -212,6 +242,9 @@ export function parseCancellationReason(value: unknown): string | undefined {
   if (!isRecord(value)) {
     throw new HttpError(400, "Cancellation details must be a JSON object.");
   }
+  if (Object.keys(value).some((field) => field !== "reason")) {
+    throw new HttpError(400, "Only reason may be provided.");
+  }
   if (
     value.reason !== undefined &&
     (typeof value.reason !== "string" || value.reason.trim().length > 1000)
@@ -226,6 +259,13 @@ export function parseCancellationReason(value: unknown): string | undefined {
 export function parseAvailabilityInput(
   query: Record<string, unknown>,
 ): AvailabilityInput {
+  if (
+    Object.keys(query).some(
+      (field) => field !== "startDate" && field !== "endDate" && field !== "quantity",
+    )
+  ) {
+    throw new HttpError(400, "Only startDate, endDate, and quantity are supported.");
+  }
   const { startDate, endDate } = parseDateRange(
     query.startDate,
     query.endDate,

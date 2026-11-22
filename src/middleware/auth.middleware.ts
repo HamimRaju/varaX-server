@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 import { jwtVerificationConfig, remoteJwks } from "../config/jwt.js";
 import { User } from "../models/User.js";
 import { USER_ROLES, type UserRole } from "../models/types.js";
+import { protectedRequestLimiter } from "./rate-limit.middleware.js";
 
 const unauthorized = (
   response: Response,
@@ -26,7 +27,7 @@ function isUserRole(role: unknown): role is UserRole {
   );
 }
 
-export const verifyToken: RequestHandler = async (
+const verifyTokenFromDatabase: RequestHandler = async (
   request,
   response,
   next,
@@ -51,7 +52,7 @@ export const verifyToken: RequestHandler = async (
       issuer: jwtVerificationConfig.issuer,
       audience: jwtVerificationConfig.audience,
       algorithms: ["EdDSA"],
-      requiredClaims: ["exp", "sub"],
+      requiredClaims: ["exp", "sub", "iss", "aud"],
     });
     subject = payload.sub;
   } catch {
@@ -99,6 +100,17 @@ export const verifyToken: RequestHandler = async (
   };
 
   next();
+};
+
+export const verifyToken: RequestHandler = (request, response, next) => {
+  protectedRequestLimiter(request, response, (error?: unknown) => {
+    if (error) {
+      next(error);
+      return;
+    }
+    if (response.headersSent) return;
+    void verifyTokenFromDatabase(request, response, next);
+  });
 };
 
 async function findUserById(subject: string) {

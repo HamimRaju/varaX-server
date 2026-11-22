@@ -57,17 +57,35 @@ function positiveInteger(
 export function parseDashboardPagination(
   query: Record<string, unknown>,
   defaultLimit = 10,
+  additionalFields: readonly string[] = [],
 ): DashboardPagination {
+  const allowed = new Set(["page", "limit", ...additionalFields]);
+  const unexpected = Object.keys(query).find((field) => !allowed.has(field));
+  if (unexpected) {
+    throw new HttpError(
+      400,
+      `${unexpected} is not a supported query parameter.`,
+    );
+  }
+  const page = positiveInteger(query.page, "page", 1);
+  const limit = positiveInteger(query.limit, "limit", defaultLimit, 50);
+  if (!Number.isSafeInteger((page - 1) * limit)) {
+    throw new HttpError(400, "page is too large.");
+  }
   return {
-    page: positiveInteger(query.page, "page", 1),
-    limit: positiveInteger(query.limit, "limit", defaultLimit, 50),
+    page,
+    limit,
   };
 }
 
 export function parseCustomerBookingHistoryQuery(
   query: Record<string, unknown>,
 ): CustomerBookingHistoryQuery {
-  const pagination = parseDashboardPagination(query, 10);
+  const pagination = parseDashboardPagination(query, 10, [
+    "status",
+    "paymentStatus",
+    "sort",
+  ]);
   const rawStatus = queryString(query.status, "status");
   const rawPaymentStatus = queryString(query.paymentStatus, "paymentStatus");
   const rawSort = queryString(query.sort, "sort") ?? "newest";
@@ -149,7 +167,12 @@ export function parseProfileUpdate(value: unknown): ProfileUpdate {
       } catch {
         throw new HttpError(400, "image must be an absolute HTTP(S) URL.");
       }
-      if (parsedImage.protocol !== "https:" && parsedImage.protocol !== "http:") {
+      if (
+        (parsedImage.protocol !== "https:" &&
+          parsedImage.protocol !== "http:") ||
+        parsedImage.username ||
+        parsedImage.password
+      ) {
         throw new HttpError(400, "image must be an absolute HTTP(S) URL.");
       }
       set.image = image;

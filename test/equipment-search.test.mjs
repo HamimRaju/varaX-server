@@ -12,6 +12,7 @@ import {
   escapeRegex,
   parseEquipmentSearchQuery,
 } from "../dist/utils/equipment-search-validation.js";
+import { parseCreateEquipmentInput } from "../dist/utils/equipment-validation.js";
 
 process.env.NODE_ENV = "test";
 process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/varax-search-tests";
@@ -425,12 +426,73 @@ test("invalid and protected query parameters are rejected", () => {
     { rentalType: "yearly" },
     { availability: "yes" },
     { sort: "random" },
+    { search: { $ne: "" } },
     { status: "approved" },
     { isDeleted: "false" },
     { search: ["one", "two"] },
+    { search: { $ne: "" } },
+    { minPrice: { $gt: "0" } },
+    { page: "9007199254740991", limit: "50" },
   ]) {
     assert.throws(() => parseEquipmentSearchQuery(query), { statusCode: 400 });
   }
+});
+
+test("equipment numeric inputs reject booleans but preserve numeric form values", () => {
+  const valid = {
+    name: "Camera",
+    description: "Rental camera",
+    category: "Electronics",
+    location: "Dhaka",
+    price: 10,
+    rentalType: "daily",
+    availableQuantity: 1,
+    image: "https://images.example.test/camera.jpg",
+  };
+  assert.throws(
+    () => parseCreateEquipmentInput({ ...valid, price: true }),
+    { statusCode: 400 },
+  );
+  assert.throws(
+    () => parseCreateEquipmentInput({ ...valid, availableQuantity: true }),
+    { statusCode: 400 },
+  );
+  assert.equal(
+    parseCreateEquipmentInput({
+      ...valid,
+      price: "10.25",
+      availableQuantity: "2",
+    }).price,
+    10.25,
+  );
+});
+
+test("equipment write validation rejects booleans but accepts form numeric strings", () => {
+  const input = {
+    name: "Camera",
+    description: "Portable camera equipment",
+    category: "Electronics",
+    location: "Dhaka",
+    price: 10,
+    rentalType: "daily",
+    availableQuantity: 1,
+    image: "https://images.example.test/camera.jpg",
+  };
+  assert.throws(
+    () => parseCreateEquipmentInput({ ...input, price: true }),
+    { statusCode: 400 },
+  );
+  assert.throws(
+    () => parseCreateEquipmentInput({ ...input, availableQuantity: true }),
+    { statusCode: 400 },
+  );
+  const parsed = parseCreateEquipmentInput({
+    ...input,
+    price: "10.25",
+    availableQuantity: "2",
+  });
+  assert.equal(parsed.price, 10.25);
+  assert.equal(parsed.availableQuantity, 2);
 });
 
 test("combined filters use one Mongo filter for results and count", async () => {

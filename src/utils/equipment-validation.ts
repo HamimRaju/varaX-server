@@ -44,14 +44,32 @@ const hostedImageUrlSchema = z
     );
   }, "Image URL must use HTTP or HTTPS and cannot contain credentials.");
 
+const positiveNumberInput = z
+  .union([
+    z.number().finite(),
+    z
+      .string()
+      .trim()
+      .regex(/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/)
+      .transform(Number),
+  ])
+  .pipe(z.number().finite().positive());
+
+const positiveIntegerInput = z
+  .union([
+    z.number().int(),
+    z.string().trim().regex(/^\d+$/).transform(Number),
+  ])
+  .pipe(z.number().int().min(1));
+
 const equipmentFieldsSchema = z.object({
   name: z.string().trim().min(1).max(90),
   description: z.string().trim().min(1).max(1_000),
   category: equipmentCategorySchema,
   location: z.string().trim().min(1).max(160),
-  price: z.coerce.number().finite().positive(),
+  price: positiveNumberInput,
   rentalType: equipmentRentalTypeSchema,
-  availableQuantity: z.coerce.number().int().min(1),
+  availableQuantity: positiveIntegerInput,
   condition: z.string().trim().max(120).optional(),
   brand: z.string().trim().max(100).optional(),
   model: z.string().trim().max(100).optional(),

@@ -3,6 +3,7 @@ import {
   Equipment,
   type EquipmentFields,
 } from "../models/Equipment.js";
+import { User } from "../models/User.js";
 import type { EquipmentStatus } from "../models/types.js";
 import type { AuthenticatedUser } from "../types/authenticated-user.js";
 import { HttpError } from "../utils/http-error.js";
@@ -210,15 +211,24 @@ export async function getEquipmentDetails(
   const isOwner =
     viewer?.role === "owner" &&
     equipment.ownerId.toString() === viewer.id.toString();
-  if (viewer?.role === "admin" || isOwner) {
-    return equipment;
+  if (
+    viewer?.role !== "admin" &&
+    !isOwner &&
+    !(equipment.status === "approved" && equipment.isDeleted === false)
+  ) {
+    notFound();
   }
 
-  if (equipment.status === "approved" && equipment.isDeleted === false) {
-    return equipment;
-  }
-
-  notFound();
+  // Expose the public owner display name without replacing the owner ObjectId.
+  const owner = await User.findById(equipment.ownerId)
+    .select("name image")
+    .lean()
+    .exec();
+  return {
+    ...equipment,
+    ownerName: owner?.name ?? "VaraX verified owner",
+    ownerImage: owner?.image ?? null,
+  };
 }
 
 export async function createEquipment(

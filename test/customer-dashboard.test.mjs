@@ -997,6 +997,7 @@ test("profile updates reject role, email, status, IDs, and invalid values", asyn
     { name: " " },
     { phone: "bad number!" },
     { image: "javascript:alert(1)" },
+    { image: "https://user:pass@images.example.test/avatar.jpg" },
   ]) {
     assert.equal(
       (

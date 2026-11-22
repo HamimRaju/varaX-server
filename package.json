@@ -11,12 +11,14 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "seed": "node scripts/seed-demo.mjs",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
+    "express-rate-limit": "^8.7.5",
     "helmet": "^8.3.0",
     "jose": "^6.2.18",
     "mongoose": "^9.12.3",

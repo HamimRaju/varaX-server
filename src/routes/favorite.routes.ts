@@ -8,12 +8,13 @@ import {
   verifyRenter,
   verifyToken,
 } from "../middleware/auth.middleware.js";
+import { accountWriteLimiter } from "../middleware/rate-limit.middleware.js";
 
 const favoriteRouter = Router();
 favoriteRouter.use(verifyToken, verifyRenter);
 
 favoriteRouter.get("/", listMyFavorites);
-favoriteRouter.post("/:equipmentId", addFavorite);
-favoriteRouter.delete("/:equipmentId", removeFavorite);
+favoriteRouter.post("/:equipmentId", accountWriteLimiter, addFavorite);
+favoriteRouter.delete("/:equipmentId", accountWriteLimiter, removeFavorite);
 
 export default favoriteRouter;

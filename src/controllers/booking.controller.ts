@@ -85,7 +85,7 @@ export const getOwnerBookingRequests: RequestHandler = async (
 ) => {
   const user = getAuthenticatedUser(request.user);
   const query = request.query as Record<string, unknown>;
-  const pagination = parseBookingPagination(query);
+  const pagination = parseBookingPagination(query, ["status"]);
   const status = parseBookingStatusFilter(query.status);
   const result = await bookingService.listOwnerBookingRequests(
     user.id,

@@ -11,6 +11,7 @@ import {
   verifyRenter,
   verifyToken,
 } from "../middleware/auth.middleware.js";
+import { accountWriteLimiter } from "../middleware/rate-limit.middleware.js";
 
 const customerDashboardRouter = Router();
 
@@ -19,7 +20,11 @@ customerDashboardRouter.get("/overview", getCustomerDashboardOverview);
 customerDashboardRouter.get("/bookings", getCustomerDashboardBookings);
 customerDashboardRouter.get("/favorites", getCustomerDashboardFavorites);
 customerDashboardRouter.get("/profile", getCustomerDashboardProfile);
-customerDashboardRouter.patch("/profile", updateCustomerDashboardProfile);
+customerDashboardRouter.patch(
+  "/profile",
+  accountWriteLimiter,
+  updateCustomerDashboardProfile,
+);
 customerDashboardRouter.get("/activity", getCustomerDashboardActivity);
 
 export default customerDashboardRouter;

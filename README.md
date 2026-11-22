@@ -192,7 +192,7 @@ Content-Type: application/json
   "startDate": "2026-12-01",
   "endDate": "2026-12-05",
   "quantity": 1,
-  "contactNumber": "01XXXXXXXXX",
+  "contactNumber": "01712345678",
   "deliveryAddress": "Dhaka, Bangladesh",
   "notes": "Please contact before delivery"
 }
@@ -1161,3 +1161,194 @@ The analytics are calculated from live MongoDB aggregation pipelines over the
 existing User, Equipment, Booking, and Payment collections. No analytics
 collection or private-owner cache is used. Existing indexes support owner,
 equipment, booking, payment, and timestamp joins/filters.
+
+## Security and production configuration
+
+### Environment and CORS
+
+Use `.env.example` as the local template. Required startup values are
+`MONGODB_URI`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `JWT_ISSUER`,
+`JWT_AUDIENCE`, and `JWKS_URL`. `CLIENT_URL` is required in production; `PORT`
+defaults to `5000`, `NODE_ENV` to `development`, and `TRUST_PROXY_HOPS` to `0`.
+Production requires HTTPS for the client origin, issuer, and JWKS URL.
+
+CORS permits only the normalized origin from `CLIENT_URL` (one browser origin)
+and allows requests without an `Origin` header for non-browser clients. The
+service does not enable wildcard production CORS. If it is behind a reverse
+proxy, set `TRUST_PROXY_HOPS` to the exact trusted hop count only when that
+proxy overwrites forwarding headers and direct app access is blocked. Incorrect
+proxy trust can allow IP spoofing and weaken rate limits. `.env` and `.env.*`
+are ignored by Git; only `.env.example` is intended to be committed.
+
+### Authentication and input handling
+
+Protected routes cryptographically verify EdDSA JWTs against the cached remote
+JWKS and validate expiration, issuer, audience, and subject. Authorization uses
+the current database user role and `isActive` value rather than token role
+claims. Inactive accounts are denied. Better Auth login/session endpoints are
+external to this backend; the external auth service must separately rate-limit
+credential and recovery endpoints.
+
+Request validation uses the existing Zod schemas plus explicit parsers. IDs
+must be valid 24-character ObjectIds; enums, scalar types, date-only values,
+pagination (including safe skip bounds), and body fields are checked before
+database use. Search text is escaped before regex use. Protected update fields
+are rejected. User-authored descriptions and notes are retained as text instead
+of being destructively stripped; clients must render them with normal output
+escaping.
+
+### HTTP protections and rate limits
+
+Helmet is enabled, `X-Powered-By` is disabled, JSON and URL-encoded bodies are
+limited to `100kb`, and URL-encoded bodies are capped at 1,000 parameters. The
+Stripe webhook uses a raw JSON body limited to `1mb` so signature verification
+uses the original bytes.
+
+| Scope | Limit |
+| --- | --- |
+| Requests passing through `verifyToken` | 600 per IP per 15 minutes |
+| Public equipment search and availability | 300 per IP per minute |
+| Booking create/cancel/status writes | 30 per authenticated account per 15 minutes |
+| Stripe checkout creation | 10 per authenticated account per 15 minutes |
+| Profile, favorite, and admin writes | 60 per authenticated account per 15 minutes |
+| Admin and owner analytics | 60 per authenticated account per minute |
+| Stripe webhook delivery | 500 per source IP per minute |
+
+Rate-limit responses use `429` with the standard API error envelope and rate
+limit headers. Webhook allowance is intentionally high; webhook event
+idempotency remains the primary duplicate-delivery control. The limiter uses an
+in-memory store per Node process. Multi-instance deployments therefore enforce
+these limits per instance, not globally; use an appropriate shared store at the
+deployment layer when a global quota is needed.
+
+Access logs contain method, path (without query string), status, and duration;
+request bodies, tokens, and query values are not logged. Production 5xx
+responses are generic and production error logs omit stack traces and error
+messages that may contain connection details. In development, errors retain
+diagnostic detail.
+
+### Payments, inventory, and database lifecycle
+
+Stripe webhook signatures are verified against the raw body. Checkout redirects
+never establish payment success; stored amounts and currency are validated in
+the webhook workflow, and event IDs make processing idempotent. Failed,
+expired, and refunded states do not confirm bookings. No admin endpoint
+fabricates paid state or a refund.
+
+Inventory reservation, cancellation, owner transitions, and payment
+fulfillment use MongoDB transactions and an equipment write lock. Production
+MongoDB must be a replica set or sharded cluster; unsupported transaction
+deployments fail closed with `503` rather than using unsafe non-transactional
+inventory updates. A single Mongoose connection is reused. `SIGINT`/`SIGTERM`
+stops the HTTP listener and closes that connection.
+
+## Stabilization notes
+
+- The API uses bounded database pagination, projections, escaped searches, and
+  existing query-pattern indexes; analytics and dashboard aggregates execute
+  in MongoDB rather than loading collections into application memory.
+- Tests exercise API routes with mocked model persistence. They do not replace a
+  live MongoDB deployment smoke test, especially for aggregation execution and
+  transaction support.
+- This repository does not provide Better Auth's login endpoints or a shared
+  distributed rate-limit store. No XSS content rewriting is applied to user
+  text; clients must safely render it.
+
+## Security and production configuration
+
+### Required environment
+
+Copy `.env.example` to a private `.env` file for local development. MongoDB,
+Stripe, and JWT settings are required for startup. `PORT`, `NODE_ENV`, and
+`TRUST_PROXY_HOPS` have defaults; `CLIENT_URL` is required in production.
+
+| Variable | Purpose |
+| --- | --- |
+| `NODE_ENV` | `development`, `test`, or `production` |
+| `PORT` | HTTP listen port |
+| `MONGODB_URI` | MongoDB connection string |
+| `STRIPE_SECRET_KEY` | Stripe secret API key |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
+| `CLIENT_URL` | The single allowed browser origin |
+| `JWT_ISSUER` | Expected JWT issuer |
+| `JWT_AUDIENCE` | Expected JWT audience |
+| `JWKS_URL` | HTTPS JWKS endpoint in production |
+| `TRUST_PROXY_HOPS` | Number of trusted reverse-proxy hops; defaults to `0` |
+
+Never commit `.env` or real credentials. `CLIENT_URL` is treated as a one-origin
+CORS allowlist (its URL origin is used); production requires HTTPS. Requests
+without an `Origin` header are allowed for non-browser clients. Add multiple
+origins only by deliberately extending this allowlist after reviewing the
+deployment's browser origins.
+
+Set `TRUST_PROXY_HOPS` only when the service is behind a known proxy chain, and
+set it to the exact number of trusted hops. The proxy must overwrite incoming
+forwarding headers and direct access to the application should be restricted;
+incorrect trust settings can let clients spoof their source IP. The default
+`0` trusts no proxy headers.
+
+### Authentication, authorization, and validation
+
+The API verifies EdDSA JWT signatures against the configured remote JWKS and
+checks expiration, issuer, audience, and subject. It then loads the user from
+MongoDB and uses that record's role and `isActive` state for authorization.
+Inactive users are denied protected routes; role and status changes take effect
+on their next request. Better Auth's login/session endpoints are external to
+this backend, so their own deployment must rate-limit login and credential
+recovery endpoints as well.
+
+Request validation uses the existing Zod schemas and focused parsers. IDs are
+validated before database use; pagination and query enums are bounded; search
+input is treated literally with escaped regex metacharacters; protected update
+fields are rejected. User-entered descriptions and notes are preserved rather
+than destructively stripped—the API returns JSON and clients must render text
+with normal output escaping.
+
+### Request limits, CORS, headers, and logs
+
+Helmet is enabled. JSON and URL-encoded request bodies are limited to `100kb`,
+with URL-encoded parameters capped at `1000`; the raw Stripe webhook body is
+limited to `1mb` and is parsed before JSON middleware so signature verification
+uses the original bytes. Production CORS permits only the configured
+`CLIENT_URL`.
+
+The API applies per-process in-memory limits: protected requests are capped at
+600 per IP per 15 minutes; public equipment/search and availability reads at
+300 per IP per minute; booking writes at 30 per account per 15 minutes; checkout
+creation at 10 per account per 15 minutes; profile/favorite/admin writes at 60
+per account per 15 minutes; analytics at 60 per account per minute; and verified
+Stripe webhook requests at 500 per IP per minute. Stripe webhooks remain
+idempotent and the webhook cap is intentionally high to allow normal delivery
+and retries.
+
+These rate limits use each Node process's memory store. In a multi-instance
+deployment, limits are per instance, not globally shared; use a shared store at
+the deployment layer if a cross-instance quota is required. Morgan logs method,
+path, status, and duration without query strings or request bodies. Production
+5xx responses are generic and production error logs omit stack traces and error
+messages that could contain database details.
+
+### Payments, inventory, and database lifecycle
+
+Stripe payment success is accepted only from signature-verified webhooks. The
+stored booking amount and BDT currency are checked before fulfillment; duplicate
+events are idempotent. Checkout redirects do not establish payment success.
+Payment and booking transitions run transactionally, and unfulfillable
+successful payments use the existing refund-recovery workflow.
+
+Booking creation, confirmation, cancellation, and relevant payment transitions
+serialize inventory writes in MongoDB transactions. Production MongoDB must be
+a replica set or sharded cluster for these operations. If transactions are
+unavailable, booking/payment writes fail closed with `503`; the backend does
+not silently fall back to unsafe non-transactional inventory changes.
+
+The application reuses one Mongoose connection. On `SIGINT` or `SIGTERM`, it
+stops accepting HTTP requests and closes the MongoDB connection. `.env` files
+are ignored by Git; `.env.example` contains placeholders only.
+
+### Dependency audit and limitations
+
+Run `npm audit` during maintenance and review advisories before dependency
+updates. This stabilization pass did not apply major dependency upgrades. The
+backend's in-memory rate limits do not coordinate across multiple instances,
+and this repository does not host Better Auth's login endpoints.

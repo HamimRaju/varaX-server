@@ -21,21 +21,38 @@ import paymentWebhookRouter from "./routes/payment-webhook.routes.js";
 const app = express();
 
 app.disable("x-powered-by");
+app.set("trust proxy", env.TRUST_PROXY_HOPS);
 app.use(helmet());
+const allowedClientOrigin = env.CLIENT_URL
+  ? new URL(env.CLIENT_URL).origin
+  : undefined;
 app.use(
   cors({
     credentials: true,
     origin(origin, callback) {
       // Non-browser clients do not send Origin; browser clients must match CLIENT_URL.
-      callback(null, !origin || origin === env.CLIENT_URL);
+      callback(null, !origin || origin === allowedClientOrigin);
     },
   }),
 );
-app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+morgan.token("path", (request) => request.url?.split("?", 1)[0] ?? "/");
+app.use(
+  morgan(
+    env.NODE_ENV === "production"
+      ? ":remote-addr :method :path :status :response-time ms"
+      : ":method :path :status :response-time ms",
+  ),
+);
 // Stripe signature verification requires the untouched raw request body.
 app.use("/api/payments/webhook", paymentWebhookRouter);
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "100kb" }));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "100kb",
+    parameterLimit: 1_000,
+  }),
+);
 
 app.use("/api", healthRouter);
 app.use("/api/bookings", bookingRouter);
