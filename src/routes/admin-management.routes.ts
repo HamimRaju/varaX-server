@@ -1,5 +1,12 @@
 import { Router } from "express";
 import {
+  getAdminBookingAnalytics,
+  getAdminEquipmentAnalytics,
+  getAdminRevenueAnalytics,
+  getAdminUserAnalytics,
+  getAdminAnalyticsOverview,
+} from "../controllers/analytics.controller.js";
+import {
   getAdminBookings,
   getAdminBookingDetails,
   getAdminDashboardOverview,
@@ -16,6 +23,11 @@ import { verifyAdmin, verifyToken } from "../middleware/auth.middleware.js";
 const adminManagementRouter = Router();
 
 adminManagementRouter.use(verifyToken, verifyAdmin);
+adminManagementRouter.get("/analytics/overview", getAdminAnalyticsOverview);
+adminManagementRouter.get("/analytics/revenue", getAdminRevenueAnalytics);
+adminManagementRouter.get("/analytics/bookings", getAdminBookingAnalytics);
+adminManagementRouter.get("/analytics/equipment", getAdminEquipmentAnalytics);
+adminManagementRouter.get("/analytics/users", getAdminUserAnalytics);
 adminManagementRouter.get("/dashboard/overview", getAdminDashboardOverview);
 adminManagementRouter.get("/dashboard/profile", getAdminDashboardProfile);
 adminManagementRouter.patch("/dashboard/profile", updateAdminDashboardProfile);

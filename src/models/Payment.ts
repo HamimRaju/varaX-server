@@ -156,6 +156,10 @@ const paymentSchema = new Schema<PaymentFields>(
 );
 
 paymentSchema.index({ bookingId: 1 });
+paymentSchema.index(
+  { bookingId: 1, paymentStatus: 1, paidAt: 1 },
+  { name: "payments_booking_paid_at_idx" },
+);
 paymentSchema.index({ customerId: 1 });
 paymentSchema.index({ ownerId: 1 });
 paymentSchema.index({ equipmentId: 1 });

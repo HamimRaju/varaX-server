@@ -972,3 +972,192 @@ Admin profile reads expose only `_id`, name, email, image, phone, role, active
 status, and creation date. Updates reuse the existing profile validator and
 permit only `name`, `image`, and `phone`; role, status, email, IDs, email
 verification, passwords, and Better Auth fields are rejected.
+
+## Admin and owner analytics APIs
+
+Admin analytics endpoints require `Authorization: Bearer <token>`,
+`verifyToken`, and the `admin` role. Owner analytics endpoints require the same
+token middleware and the `owner` role. Customer access is denied, owners cannot
+read admin analytics, and each owner pipeline is scoped by the owner ID from
+the verified database-backed request identity.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/admin/analytics/overview` | Platform revenue, booking, user, and equipment summary |
+| `GET /api/admin/analytics/revenue` | Platform revenue series |
+| `GET /api/admin/analytics/bookings` | Booking status, monthly, and growth metrics |
+| `GET /api/admin/analytics/equipment` | Category/status counts and rental rankings |
+| `GET /api/admin/analytics/users` | Role counts, signup months, and growth |
+| `GET /api/owner/analytics/overview` | Owner revenue, booking, equipment, and performance summary |
+| `GET /api/owner/analytics/revenue` | Owner-scoped revenue series |
+| `GET /api/owner/analytics/equipment` | Owner-scoped rental and revenue performance |
+
+### Revenue periods, dates, and currency
+
+The admin and owner revenue endpoints accept:
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `period` | `daily`, `weekly`, `monthly`, `yearly` | `monthly` |
+| `startDate` | UTC calendar date, `YYYY-MM-DD` | Optional |
+| `endDate` | UTC calendar date, `YYYY-MM-DD` | Optional |
+
+Custom ranges must provide both dates, must be ordered, cannot end in the future,
+and include both calendar-day endpoints. Timestamps are filtered as
+`paidAt >= startDate UTC midnight` and `paidAt < midnight after endDate`. If
+neither date is provided, the default window is the latest 30 calendar days,
+12 ISO weeks, 12 calendar months, or 5 calendar years, depending on `period`.
+Maximum custom spans are 366 days for daily, 5 years for weekly, 10 years for
+monthly, and 20 years for yearly requests. Dates and buckets use UTC; weeks use
+ISO week-year labels such as `2026-W03`.
+
+Revenue includes only `Payment.paymentStatus: "paid"` records associated with a
+booking. It excludes failed, pending, refunded, refund-pending, refund-required,
+and review-required payments. A Stripe PaymentIntent is counted once; a payment
+without an intent ID is keyed by its Payment record ID. The amount uses
+`receivedAmountMinorUnits`, then `amountMinorUnits`, then the legacy `amount`
+rounded to minor units. Grouping and summation use integer minor units; API
+amounts are presented in **BDT**. Time-bucketed analytics require the actual
+`Payment.paidAt` timestamp; records without it are omitted from revenue series
+rather than attributed to checkout creation time. All-time revenue totals still
+include eligible paid records without a `paidAt`. These metrics are gross
+collected revenue, not commission-adjusted revenue or owner payout.
+
+Example:
+
+```http
+GET /api/admin/analytics/revenue?period=monthly&startDate=2026-01-01&endDate=2026-11-22
+Authorization: Bearer <admin-token>
+```
+
+```json
+{
+  "success": true,
+  "message": "Admin revenue analytics fetched successfully.",
+  "data": {
+    "period": "monthly",
+    "currency": "BDT",
+    "startDate": "2026-01-01",
+    "endDate": "2026-11-22",
+    "results": [
+      {
+        "label": "2026-11",
+        "revenue": 25000,
+        "paymentCount": 8,
+        "bookingCount": 7
+      }
+    ]
+  }
+}
+```
+
+The response contains every bucket in the requested/default range. Buckets
+without payments return zero revenue and zero counts. `paymentCount` counts
+unique successful payment transactions after PaymentIntent deduplication;
+`bookingCount` counts distinct bookings represented in that period.
+
+### Metric definitions
+
+- Admin `totalUsers`, `totalCustomers`, and `totalOwners` count persisted users
+  with recognized roles. Inactive accounts are included; the User model has no
+  deleted state. Admin `totalEquipment` excludes soft-deleted and
+  unrecognized-status listings. Booking totals and status counts include only
+  recognized booking statuses. Admin overview revenue and paid booking totals
+  use the successful-payment rules above.
+- `averageBookingValue` is the mean of positive, valid `Booking.totalAmount`
+  values in major BDT units across recognized bookings. It includes pending,
+  cancelled, and rejected bookings; it is not an average paid amount.
+- Admin `bookingsByMonth` and `newUsersByMonth` cover the last 12 UTC calendar
+  months, including zero-count months. Booking/user growth compares the rolling
+  30 days ending at request time with the immediately preceding 30 days. If the
+  previous count is zero, `percentChange` is `null` when the current count is
+  positive (no finite baseline), and `0` when both counts are zero.
+- Equipment rental counts count one booking document per equipment item when
+  its booking status is `confirmed`, `active`, or `completed`, regardless of
+  booking quantity. Pending, cancelled, and rejected bookings are not rentals.
+  Most-rented rankings omit zero-rental listings; least-rented rankings include
+  zero-rental active listings. Admin top owners include only safe owner ID,
+  name, and image summaries.
+- Owner totals include only bookings whose persisted `ownerId` matches the
+  authenticated owner. Owner revenue includes eligible historical payments
+  even when their equipment has since been soft-deleted. Active equipment
+  counts, equipment rankings, bookings-by-equipment, and revenue-by-equipment
+  exclude soft-deleted listings. Owner `monthlyRevenue` covers the last 12 UTC
+  months; `equipmentPerformance` is the top five current listings by successful
+  gross revenue. `bookingsByEquipment` and `revenueByEquipment` include current
+  listings with zero values.
+- User analytics return aggregate counts only—no user names, emails, or other
+  profile data. User role/month counts use recognized roles, include inactive
+  accounts, and use `User.createdAt` in UTC.
+
+Admin overview response shape:
+
+```json
+{
+  "success": true,
+  "message": "Admin analytics overview fetched successfully.",
+  "data": {
+    "totalRevenue": 825000,
+    "totalBookings": 310,
+    "totalUsers": 120,
+    "totalEquipment": 48,
+    "totalCustomers": 90,
+    "totalOwners": 25,
+    "averageBookingValue": 2650,
+    "completedBookings": 220,
+    "activeRentals": 7,
+    "pendingBookings": 12,
+    "currency": "BDT"
+  }
+}
+```
+
+Owner overview response shape:
+
+```json
+{
+  "success": true,
+  "message": "Owner analytics overview fetched successfully.",
+  "data": {
+    "totalRevenue": 18500,
+    "totalBookings": 12,
+    "totalEquipment": 4,
+    "activeRentals": 1,
+    "completedRentals": 8,
+    "averageBookingValue": 2400,
+    "currency": "BDT",
+    "monthlyRevenue": [
+      { "month": "2025-12", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-01", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-02", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-03", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-04", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-05", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-06", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-07", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-08", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-09", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-10", "revenue": 0, "paymentCount": 0 },
+      { "month": "2026-11", "revenue": 4500, "paymentCount": 2 }
+    ],
+    "equipmentPerformance": [
+      {
+        "equipment": {
+          "_id": "64a1b2c3d4e5f67890123456",
+          "name": "Camera A",
+          "image": "https://images.example.test/camera-a.jpg",
+          "category": "Photography Equipment",
+          "location": "Dhaka"
+        },
+        "revenue": 4500,
+        "paymentCount": 2
+      }
+    ]
+  }
+}
+```
+
+The analytics are calculated from live MongoDB aggregation pipelines over the
+existing User, Equipment, Booking, and Payment collections. No analytics
+collection or private-owner cache is used. Existing indexes support owner,
+equipment, booking, payment, and timestamp joins/filters.

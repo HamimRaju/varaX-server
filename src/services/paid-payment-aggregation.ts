@@ -4,6 +4,7 @@ export interface PaidPaymentAggregationOptions {
   ownerId?: Types.ObjectId;
   startDate?: Date;
   endDateExclusive?: Date;
+  timestampBasis?: "paidAt" | "paidAtOrCreatedAt";
 }
 
 /**
@@ -13,7 +14,7 @@ export interface PaidPaymentAggregationOptions {
  */
 export function successfulPaymentStages(
   options: PaidPaymentAggregationOptions = {},
-): PipelineStage[] {
+): PipelineStage.FacetPipelineStage[] {
   const dateRange =
     options.startDate || options.endDateExclusive
       ? {
@@ -23,6 +24,26 @@ export function successfulPaymentStages(
             : {}),
         }
       : undefined;
+  const paymentMatch: Record<string, unknown> = {
+    paymentStatus: "paid",
+    fulfillmentStatus: {
+      $nin: [
+        "refunded",
+        "refund_pending",
+        "refund_required",
+        "review_required",
+      ],
+    },
+  };
+  if (dateRange) {
+    paymentMatch.$or =
+      options.timestampBasis === "paidAt"
+        ? [{ paidAt: dateRange }]
+        : [
+            { paidAt: dateRange },
+            { paidAt: { $in: [null] }, createdAt: dateRange },
+          ];
+  }
 
   return [
     { $match: options.ownerId ? { ownerId: options.ownerId } : {} },
@@ -32,19 +53,7 @@ export function successfulPaymentStages(
         localField: "_id",
         foreignField: "bookingId",
         pipeline: [
-          {
-            $match: {
-              paymentStatus: "paid",
-              fulfillmentStatus: {
-                $nin: [
-                  "refunded",
-                  "refund_pending",
-                  "refund_required",
-                  "review_required",
-                ],
-              },
-            },
-          },
+          { $match: paymentMatch },
         ],
         as: "payments",
       },
@@ -52,16 +61,22 @@ export function successfulPaymentStages(
     { $unwind: "$payments" },
     {
       $addFields: {
-        earningDate: {
-          $ifNull: ["$payments.paidAt", "$payments.createdAt"],
-        },
-        grossAmount: {
+        earningDate:
+          options.timestampBasis === "paidAt"
+            ? "$payments.paidAt"
+            : { $ifNull: ["$payments.paidAt", "$payments.createdAt"] },
+        grossAmountMinorUnits: {
           $ifNull: [
-            { $divide: ["$payments.receivedAmountMinorUnits", 100] },
+            "$payments.receivedAmountMinorUnits",
             {
               $ifNull: [
-                { $divide: ["$payments.amountMinorUnits", 100] },
-                "$payments.amount",
+                "$payments.amountMinorUnits",
+                {
+                  $round: [
+                    { $multiply: ["$payments.amount", 100] },
+                    0,
+                  ],
+                },
               ],
             },
           ],
@@ -83,7 +98,7 @@ export function successfulPaymentStages(
           $type: "date",
           ...(dateRange ?? {}),
         },
-        grossAmount: { $type: "number", $gt: 0 },
+        grossAmountMinorUnits: { $type: "number", $gt: 0 },
       },
     },
     { $sort: { earningDate: -1, "payments._id": -1 } },
@@ -96,8 +111,14 @@ export function successfulPaymentStages(
         equipmentId: { $first: "$equipmentId" },
         customerId: { $first: "$customerId" },
         paidAt: { $first: "$earningDate" },
+        actualPaidAt: { $first: "$payments.paidAt" },
         currency: { $first: "$earningCurrency" },
-        amount: { $max: "$grossAmount" },
+        amountMinorUnits: { $max: "$grossAmountMinorUnits" },
+      },
+    },
+    {
+      $addFields: {
+        amount: { $divide: ["$amountMinorUnits", 100] },
       },
     },
   ];
