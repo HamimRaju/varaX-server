@@ -585,3 +585,190 @@ separate reliable timestamps for those status transitions; `updatedAt` is not
 used as a substitute. Activity supports `page` (default `1`) and `limit`
 (default `10`, maximum `50`) and is sorted newest first. The `$unionWith`
 aggregation requires MongoDB 4.4 or later.
+
+## Owner dashboard APIs
+
+All owner dashboard endpoints require `Authorization: Bearer <token>`,
+`verifyToken`, and the `owner` role (`verifyOwner`). Customer and admin tokens
+receive `403`. The owner ID is always taken from the verified database-backed
+identity; IDs supplied in query strings or request bodies are not used to scope
+the dashboard.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/owner/dashboard/overview` | Owner equipment, request, rental, and earnings summary |
+| `GET /api/owner/dashboard/equipment` | Filtered, sorted, paginated equipment with booking counts |
+| `GET /api/owner/dashboard/rental-requests` | Filtered, sorted, paginated requests for the owner's equipment |
+| `GET /api/owner/dashboard/earnings` | Paid gross earnings and paginated recent payments |
+| `GET /api/owner/dashboard/profile` | Safe owner profile |
+| `PATCH /api/owner/dashboard/profile` | Update name, profile image, and/or phone |
+
+The equipment endpoint accepts `page` (default `1`), `limit` (default `10`,
+maximum `50`), `status` (`pending`, `approved`, or `rejected`), `search`
+(equipment name, maximum 120 characters), and `sort` (`newest`, `oldest`,
+`price_asc`, or `price_desc`, default `newest`). The rental-request endpoint
+accepts the same pagination, `status` (`pending`, `confirmed`, `active`,
+`completed`, `cancelled`, or `rejected`), and `sort` (`newest` or `oldest`,
+default `newest`). Both endpoints apply their filters and pagination in MongoDB
+and return the standard `pagination` object.
+
+The earnings endpoint accepts `page` and `limit` (defaults `1` and `10`,
+maximum `50`) and optional UTC calendar `startDate` and `endDate` filters in
+`YYYY-MM-DD` format. The end date is inclusive.
+
+### Overview, equipment, and rental requests
+
+The overview returns `totalEquipment`, `approvedEquipment`, `pendingEquipment`,
+`rejectedEquipment`, `totalRentalRequests`, `pendingRequests`,
+`confirmedBookings`, `activeRentals`, `completedRentals`, `cancelledBookings`,
+`totalEarnings`, `pendingEarnings`, and the latest five
+`recentRentalRequests`. Active equipment counts exclude soft-deleted documents;
+booking counters include historical bookings associated with the owner even if
+their equipment has since been soft-deleted. Equipment rental statistics count
+requests by the equipment's ID and include historical bookings.
+
+`pendingEarnings` is a gross requested amount, not a payment: it sums
+`Booking.totalAmount` for bookings whose booking status is `pending` and whose
+booking payment status is `unpaid` or `failed`. Those requests may still be paid
+or retried. It does not include failed/cancelled/rejected booking states or
+already-paid bookings.
+
+Rental request responses contain booking dates, quantity, rental type, amount,
+booking/payment statuses, limited equipment card fields, and the customer's ID,
+name, and profile image when available. Customer email, phone, address,
+booking contact data, notes, tokens, and authentication fields are not returned.
+This endpoint reuses the existing owner booking-list query and uses database
+pagination.
+
+Example overview response:
+
+```json
+{
+  "success": true,
+  "message": "Owner dashboard data fetched successfully.",
+  "data": {
+    "totalEquipment": 4,
+    "approvedEquipment": 2,
+    "pendingEquipment": 1,
+    "rejectedEquipment": 1,
+    "totalRentalRequests": 9,
+    "pendingRequests": 2,
+    "confirmedBookings": 3,
+    "activeRentals": 1,
+    "completedRentals": 2,
+    "cancelledBookings": 1,
+    "totalEarnings": 18500,
+    "pendingEarnings": 2400,
+    "earningsType": "gross",
+    "currency": "bdt",
+    "recentRentalRequests": []
+  }
+}
+```
+
+Example paginated equipment response:
+
+```json
+{
+  "success": true,
+  "message": "Owner equipment fetched successfully.",
+  "data": [
+    {
+      "_id": "64a1b2c3d4e5f67890123456",
+      "name": "Canon EOS R6",
+      "status": "approved",
+      "price": 1200,
+      "rentalStats": {
+        "totalRentalRequests": 5,
+        "pendingRequests": 1,
+        "confirmedBookings": 2,
+        "activeRentals": 1,
+        "completedRentals": 1
+      }
+    }
+  ],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 1,
+    "totalItems": 1,
+    "limit": 10,
+    "hasNextPage": false,
+    "hasPrevPage": false
+  }
+}
+```
+
+### Earnings calculation and limitations
+
+Earnings are calculated from persisted Payment records with
+`paymentStatus: "paid"` linked to this owner's booking. Duplicate rows sharing a
+Stripe PaymentIntent are counted once; records without an intent ID are keyed by
+their Payment record ID. The amount uses Stripe's recorded
+`receivedAmountMinorUnits` when present, otherwise the stored minor-unit amount,
+then the legacy major-unit `amount`. Failed, pending, refunded, refund-pending,
+refund-required, and review-required records are excluded. Month grouping and
+date filtering use `paidAt`, falling back to the Payment `createdAt` timestamp
+for older records.
+
+`totalEarnings` is explicitly **gross earnings** (`bdt`): the platform does not
+currently calculate commissions, owner payout amounts, or transfer status.
+`totalPaidBookings` counts distinct bookings with eligible successful payments.
+`recentPayments` contains only safe payment summaries; Stripe sessions,
+PaymentIntent IDs, secret keys, and raw Stripe objects are never returned.
+
+Example earnings response:
+
+```json
+{
+  "success": true,
+  "message": "Owner earnings fetched successfully.",
+  "data": {
+    "totalEarnings": 18500,
+    "totalPaidBookings": 12,
+    "earningsType": "gross",
+    "currency": "bdt",
+    "earningsByMonth": [{ "month": "2026-11", "amount": 18500 }],
+    "recentPayments": [
+      {
+        "paymentId": "64a1b2c3d4e5f67890123457",
+        "bookingId": "64a1b2c3d4e5f67890123458",
+        "amount": 2500,
+        "currency": "bdt",
+        "paymentStatus": "paid",
+        "paidAt": "2026-11-21T12:00:00.000Z",
+        "equipment": {
+          "_id": "64a1b2c3d4e5f67890123456",
+          "name": "Canon EOS R6",
+          "image": "https://images.example.test/camera.jpg"
+        },
+        "customer": {
+          "_id": "64a1b2c3d4e5f67890123459",
+          "name": "Alex Rahman",
+          "image": "https://images.example.test/profile.jpg"
+        }
+      }
+    ]
+  },
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 2,
+    "totalItems": 12,
+    "limit": 10,
+    "hasNextPage": true,
+    "hasPrevPage": false
+  }
+}
+```
+
+### Owner profile and historical records
+
+The profile response contains only `id`, `name`, `email`, `image`, `phone`,
+`role`, and `createdAt`. Email is read-only and must be changed through the
+Better Auth verification flow. Updates accept only `name`, `image`, and `phone`;
+role, account status, email verification, email, IDs, and authentication fields
+are rejected. Empty `image` or `phone` values clear those optional fields.
+
+Equipment deletion is soft deletion. It removes a listing from active owner
+equipment counts and lists but does not delete its bookings or payments.
+Historical requests and eligible earnings therefore remain visible in the
+owner's dashboard.

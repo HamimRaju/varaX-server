@@ -97,6 +97,14 @@ equipmentSchema.index({ price: 1 });
 // Cover the public approved/non-deleted feed and its common sort orders.
 equipmentSchema.index({ status: 1, isDeleted: 1, createdAt: -1 });
 equipmentSchema.index({ status: 1, isDeleted: 1, price: 1 });
+equipmentSchema.index(
+  { ownerId: 1, isDeleted: 1, createdAt: -1, _id: -1 },
+  { name: "equipment_owner_active_created_idx" },
+);
+equipmentSchema.index(
+  { ownerId: 1, isDeleted: 1, price: 1, _id: 1 },
+  { name: "equipment_owner_active_price_idx" },
+);
 
 export const Equipment =
   (mongoose.models.Equipment as Model<EquipmentFields> | undefined) ??

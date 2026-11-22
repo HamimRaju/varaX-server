@@ -12,6 +12,7 @@ import customerDashboardRouter from "./routes/customer-dashboard.routes.js";
 import equipmentRouter from "./routes/equipment.routes.js";
 import favoriteRouter from "./routes/favorite.routes.js";
 import healthRouter from "./routes/health.routes.js";
+import ownerDashboardRouter from "./routes/owner-dashboard.routes.js";
 import paymentRouter from "./routes/payment.routes.js";
 import paymentWebhookRouter from "./routes/payment-webhook.routes.js";
 
@@ -37,6 +38,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api", healthRouter);
 app.use("/api/bookings", bookingRouter);
 app.use("/api/customer/dashboard", customerDashboardRouter);
+app.use("/api/owner/dashboard", ownerDashboardRouter);
 app.use("/api/equipment", equipmentRouter);
 app.use("/api/admin/equipment", adminEquipmentRouter);
 app.use("/api/favorites", favoriteRouter);

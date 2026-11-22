@@ -503,17 +503,19 @@ export async function listOwnerBookingRequests(
   ownerId: Types.ObjectId,
   pagination: BookingPagination,
   status?: BookingStatus,
+  sort: "newest" | "oldest" = "newest",
 ) {
   const filter = {
     ownerId,
     ...(status ? { bookingStatus: status } : {}),
   };
   const skip = (pagination.page - 1) * pagination.limit;
+  const direction = sort === "oldest" ? 1 : -1;
   const [bookings, totalItems] = await Promise.all([
     Booking.find(filter)
       .populate({ path: "equipmentId", select: POPULATED_EQUIPMENT_FIELDS })
       .populate({ path: "customerId", select: "_id name image" })
-      .sort({ createdAt: -1, _id: -1 })
+      .sort({ createdAt: direction, _id: direction })
       .skip(skip)
       .limit(pagination.limit)
       .lean()
