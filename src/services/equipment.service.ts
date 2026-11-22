@@ -11,6 +11,7 @@ import type {
   CreateEquipmentInput,
   UpdateEquipmentInput,
 } from "../utils/equipment-validation.js";
+import type { AdminEquipmentQuery } from "../utils/admin-validation.js";
 import {
   escapeRegex,
   type EquipmentSearchQuery,
@@ -149,8 +150,54 @@ export async function listOwnerEquipment(ownerId: Types.ObjectId) {
   return Equipment.find({ ownerId }).lean().exec();
 }
 
-export async function listAllEquipment() {
-  return Equipment.find({}).lean().exec();
+export async function listAllEquipment(query: AdminEquipmentQuery) {
+  const filter: Record<string, unknown> = {
+    isDeleted: { $ne: true },
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.category ? { category: query.category } : {}),
+  };
+  if (query.search) {
+    const regex = escapeRegex(query.search);
+    filter.$or = ["name", "brand", "model", "location"].map((field) => ({
+      [field]: { $regex: regex, $options: "i" },
+    }));
+  }
+
+  const direction: 1 | -1 =
+    query.sort === "oldest" || query.sort === "price_asc" ? 1 : -1;
+  const sort =
+    query.sort === "price_asc" || query.sort === "price_desc"
+      ? { price: direction, _id: direction }
+      : { createdAt: direction, _id: direction };
+  const offset = (query.page - 1) * query.limit;
+  const [equipment, totalItems] = await Promise.all([
+    Equipment.find(filter)
+      .select(
+        "_id name description category location price rentalType availableQuantity condition brand model image terms ownerId status isDeleted createdAt updatedAt",
+      )
+      .populate({
+        path: "ownerId",
+        select: "_id name email image role isActive",
+      })
+      .sort(sort)
+      .skip(offset)
+      .limit(query.limit)
+      .lean()
+      .exec(),
+    Equipment.countDocuments(filter).exec(),
+  ]);
+  const totalPages = Math.ceil(totalItems / query.limit);
+  return {
+    equipment,
+    pagination: {
+      currentPage: query.page,
+      totalPages,
+      totalItems,
+      limit: query.limit,
+      hasNextPage: query.page < totalPages,
+      hasPrevPage: query.page > 1,
+    },
+  };
 }
 
 export async function getEquipmentDetails(

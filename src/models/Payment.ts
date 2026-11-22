@@ -160,6 +160,14 @@ paymentSchema.index({ customerId: 1 });
 paymentSchema.index({ ownerId: 1 });
 paymentSchema.index({ equipmentId: 1 });
 paymentSchema.index({ bookingId: 1, createdAt: -1 });
+paymentSchema.index(
+  { createdAt: -1, _id: -1 },
+  { name: "payments_created_idx" },
+);
+paymentSchema.index(
+  { paymentStatus: 1, createdAt: -1, _id: -1 },
+  { name: "payments_status_created_idx" },
+);
 paymentSchema.index({ customerId: 1, paymentStatus: 1, paidAt: -1 });
 paymentSchema.index(
   { activeBookingId: 1 },

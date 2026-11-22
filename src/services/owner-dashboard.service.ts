@@ -10,6 +10,7 @@ import type {
 } from "../utils/owner-dashboard-validation.js";
 import { escapeRegex } from "../utils/equipment-search-validation.js";
 import { listOwnerBookingRequests } from "./booking.service.js";
+import { successfulPaymentStages } from "./paid-payment-aggregation.js";
 
 const equipmentSort: Record<
   OwnerEquipmentQuery["sort"],
@@ -184,97 +185,6 @@ function bookingOverviewPipeline(ownerId: Types.ObjectId): PipelineStage[] {
   ];
 }
 
-function ownerPaymentStages(
-  ownerId: Types.ObjectId,
-  startDate?: Date,
-  endDateExclusive?: Date,
-): PipelineStage[] {
-  const dateRange =
-    startDate || endDateExclusive
-      ? {
-          ...(startDate ? { $gte: startDate } : {}),
-          ...(endDateExclusive ? { $lt: endDateExclusive } : {}),
-        }
-      : undefined;
-
-  return [
-    { $match: { ownerId } },
-    {
-      $lookup: {
-        from: "payments",
-        localField: "_id",
-        foreignField: "bookingId",
-        pipeline: [
-          {
-            $match: {
-              paymentStatus: "paid",
-              fulfillmentStatus: {
-                $nin: [
-                  "refunded",
-                  "refund_pending",
-                  "refund_required",
-                  "review_required",
-                ],
-              },
-            },
-          },
-        ],
-        as: "payments",
-      },
-    },
-    { $unwind: "$payments" },
-    {
-      $addFields: {
-        earningDate: {
-          $ifNull: ["$payments.paidAt", "$payments.createdAt"],
-        },
-        grossAmount: {
-          $ifNull: [
-            { $divide: ["$payments.receivedAmountMinorUnits", 100] },
-            {
-              $ifNull: [
-                { $divide: ["$payments.amountMinorUnits", 100] },
-                "$payments.amount",
-              ],
-            },
-          ],
-        },
-        earningCurrency: {
-          $ifNull: [
-            "$payments.receivedCurrency",
-            { $ifNull: ["$payments.currency", "bdt"] },
-          ],
-        },
-        paymentIntentKey: {
-          $ifNull: ["$payments.stripePaymentIntentId", "$payments._id"],
-        },
-      },
-    },
-    {
-      $match: {
-        earningDate: {
-          $type: "date",
-          ...(dateRange ?? {}),
-        },
-        grossAmount: { $type: "number", $gt: 0 },
-      },
-    },
-    { $sort: { earningDate: -1, _id: -1 } },
-    {
-      $group: {
-        _id: "$paymentIntentKey",
-        paymentId: { $first: "$payments._id" },
-        bookingId: { $first: "$_id" },
-        equipmentId: { $first: "$equipmentId" },
-        customerId: { $first: "$customerId" },
-        paidAt: { $first: "$earningDate" },
-        currency: { $first: "$earningCurrency" },
-        amount: { $max: "$grossAmount" },
-      },
-    },
-  ];
-}
-
 export async function getOwnerDashboardOverview(ownerId: Types.ObjectId) {
   const [equipmentRows, bookingRows, earningRows] = await Promise.all([
     Equipment.aggregate<{
@@ -288,7 +198,7 @@ export async function getOwnerDashboardOverview(ownerId: Types.ObjectId) {
       recentRentalRequests: Record<string, unknown>[];
     }>(bookingOverviewPipeline(ownerId)).exec(),
     Booking.aggregate<{ totalEarnings: number }>([
-      ...ownerPaymentStages(ownerId),
+      ...successfulPaymentStages({ ownerId }),
       { $group: { _id: null, totalEarnings: { $sum: "$amount" } } },
       { $project: { _id: 0, totalEarnings: 1 } },
     ]).exec(),
@@ -500,7 +410,11 @@ function earningsPipeline(
     : undefined;
   const offset = (query.page - 1) * query.limit;
   return [
-    ...ownerPaymentStages(ownerId, query.startDate, endDateExclusive),
+    ...successfulPaymentStages({
+      ownerId,
+      ...(query.startDate ? { startDate: query.startDate } : {}),
+      ...(endDateExclusive ? { endDateExclusive } : {}),
+    }),
     {
       $facet: {
         summary: [

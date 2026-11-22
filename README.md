@@ -772,3 +772,203 @@ Equipment deletion is soft deletion. It removes a listing from active owner
 equipment counts and lists but does not delete its bookings or payments.
 Historical requests and eligible earnings therefore remain visible in the
 owner's dashboard.
+
+## Admin dashboard and management APIs
+
+Every admin route requires `Authorization: Bearer <token>`, `verifyToken`, and
+the `admin` role (`verifyAdmin`). Customer and owner tokens receive `403`.
+Authorization is enforced on the server using the user's current database role
+and `isActive` status.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/admin/dashboard/overview` | Platform user, equipment, booking, and revenue totals |
+| `GET /api/admin/dashboard/profile` | Safe current admin profile |
+| `PATCH /api/admin/dashboard/profile` | Update name, image, and/or phone |
+| `GET /api/admin/users` | Searchable, role-filtered, paginated users |
+| `GET /api/admin/users/:id` | Safe user profile and account statistics |
+| `PATCH /api/admin/users/:id/role` | Assign `customer`, `owner`, or `admin` role |
+| `PATCH /api/admin/users/:id/status` | Activate or deactivate an account |
+| `GET /api/admin/equipment` | Searchable and paginated equipment moderation list |
+| `PATCH /api/admin/equipment/:id/status` | Existing equipment approval/rejection action |
+| `PATCH /api/admin/equipment/:id` | Existing admin equipment update |
+| `DELETE /api/admin/equipment/:id` | Existing admin soft-delete action |
+| `GET /api/admin/bookings` | Searchable, filtered, paginated bookings |
+| `GET /api/admin/bookings/:id` | Safe booking details and latest payment summary |
+| `GET /api/admin/payments` | Paginated payment records with safe related summaries |
+
+All list endpoints default to `page=1`, `limit=10`; `limit` must be from `1` to
+`50`. They return `data` and the standard root-level `pagination` metadata.
+Unsupported query parameters and invalid enum values return `400`.
+
+### List filters
+
+| Endpoint | Optional filters and sort |
+| --- | --- |
+| Users | `role=customer|owner|admin`, `search` (name or email), `sort=newest|oldest` |
+| Equipment | `status=pending|approved|rejected`, `search` (name, brand, model, or location), `category`, `sort=newest|oldest|price_asc|price_desc` |
+| Bookings | `status=pending|confirmed|active|completed|cancelled|rejected`, `paymentStatus=unpaid|paid|failed|refunded`, `search` (customer/owner name or email, or equipment name), `sort=newest|oldest` |
+| Payments | `status=pending|paid|failed|refunded`, `sort=newest|oldest` |
+
+Search text is limited to 120 characters, treated as a literal case-insensitive
+search (regex metacharacters are escaped), and applied in MongoDB. The booking
+search covers customer and owner names/emails and equipment name; it does not
+search private contact/address fields. Soft-deleted equipment is excluded from
+the moderation list but remains linked to historical bookings and payments.
+
+Example user list:
+
+```http
+GET /api/admin/users?role=owner&search=rahman&page=1&limit=10&sort=newest
+Authorization: Bearer <admin-token>
+```
+
+```json
+{
+  "success": true,
+  "message": "Users fetched successfully.",
+  "data": [
+    {
+      "_id": "64a1b2c3d4e5f67890123456",
+      "name": "Alex Rahman",
+      "email": "alex@example.test",
+      "image": "https://images.example.test/profile.jpg",
+      "role": "owner",
+      "isActive": true,
+      "createdAt": "2026-11-21T12:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 1,
+    "totalItems": 1,
+    "limit": 10,
+    "hasNextPage": false,
+    "hasPrevPage": false
+  }
+}
+```
+
+### User roles and account status
+
+Role changes accept only a JSON object with a valid `role`; status changes accept
+only a boolean `isActive`. Other fields are rejected. An administrator cannot
+demote or deactivate their own account. Accounts are never deleted by these
+endpoints, preserving their booking/payment history.
+
+`verifyToken` loads the user and current role/status from the database on each
+protected API request. A role change therefore takes effect on the next request
+using any still-valid token; changing roles does not delete Better Auth sessions
+or revoke the JWT itself. Deactivating an account immediately prevents it from
+accessing protected backend APIs (the middleware returns `403`), even while a
+previously issued token remains unexpired. Re-activation restores access subject
+to a valid token.
+
+Example role change:
+
+```http
+PATCH /api/admin/users/64a1b2c3d4e5f67890123456/role
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+```json
+{ "role": "owner" }
+```
+
+```json
+{
+  "success": true,
+  "message": "User role changed to owner.",
+  "data": {
+    "_id": "64a1b2c3d4e5f67890123456",
+    "name": "Alex Rahman",
+    "email": "alex@example.test",
+    "image": "https://images.example.test/profile.jpg",
+    "phone": "+8801712345678",
+    "role": "owner",
+    "isActive": true,
+    "createdAt": "2026-11-21T12:00:00.000Z"
+  }
+}
+```
+
+Account status changes use the same admin-only authorization and accept only:
+
+```http
+PATCH /api/admin/users/64a1b2c3d4e5f67890123456/status
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+```json
+{ "isActive": false }
+```
+
+### Overview and revenue
+
+The overview counts users only for the persisted `customer`, `owner`, and
+`admin` roles. Inactive accounts remain included in these user totals; the User
+model has no soft-delete field. Equipment counts exclude soft-deleted and
+unsupported-status documents. Booking totals include recognized booking
+statuses. The response includes the latest five users and bookings with safe
+profile/equipment summaries; password, session, token, private booking, and
+Stripe fields are excluded.
+
+Revenue is the sum of unique successful PaymentIntent amounts linked through
+Booking records. It uses `receivedAmountMinorUnits` when available, then the
+stored minor-unit amount, then the legacy major-unit amount. Payments without a
+PaymentIntent are keyed by Payment record ID. Pending, failed, refunded,
+refund-pending, refund-required, and review-required payments are excluded.
+`totalPaidBookings` counts distinct bookings with eligible successful payments.
+Revenue is gross `bdt`; commission, owner payouts, and transfer states are not
+calculated.
+
+Example dashboard overview:
+
+```json
+{
+  "success": true,
+  "message": "Admin dashboard data fetched successfully.",
+  "data": {
+    "totalUsers": 120,
+    "totalCustomers": 90,
+    "totalOwners": 25,
+    "totalAdmins": 5,
+    "totalEquipment": 48,
+    "approvedEquipment": 35,
+    "pendingEquipment": 8,
+    "rejectedEquipment": 5,
+    "totalBookings": 310,
+    "pendingBookings": 12,
+    "confirmedBookings": 40,
+    "activeRentals": 7,
+    "completedRentals": 220,
+    "cancelledBookings": 25,
+    "totalRevenue": 825000,
+    "totalPaidBookings": 260,
+    "currency": "bdt",
+    "recentUsers": [],
+    "recentBookings": []
+  }
+}
+```
+
+### Booking, payment, and profile restrictions
+
+Admin booking reads include customer, owner, equipment, rental details, and
+booking/payment statuses. The detail endpoint includes a safe summary of the
+latest persisted payment (amount, currency, payment/fulfillment status, method,
+and timestamps). No admin booking status-write endpoint is added, and admins
+cannot mark bookings or payments as paid.
+
+Payment listing includes safe customer, owner, equipment, and booking summaries.
+It never returns Stripe session/PaymentIntent IDs, checkout URLs, event IDs,
+secrets, or raw Stripe objects. There is no admin refund endpoint: changing a
+database status would not issue a Stripe refund. Refund state continues to be
+controlled only by the existing verified Stripe webhook/recovery workflow.
+
+Admin profile reads expose only `_id`, name, email, image, phone, role, active
+status, and creation date. Updates reuse the existing profile validator and
+permit only `name`, `image`, and `phone`; role, status, email, IDs, email
+verification, passwords, and Better Auth fields are rejected.

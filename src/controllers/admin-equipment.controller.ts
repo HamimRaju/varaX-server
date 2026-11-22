@@ -4,14 +4,23 @@ import {
   parseAdminUpdateEquipmentInput,
   parseEquipmentStatus,
 } from "../utils/equipment-validation.js";
+import { parseAdminEquipmentQuery } from "../utils/admin-validation.js";
 import * as equipmentService from "../services/equipment.service.js";
 
 export const listAllEquipment: RequestHandler = async (
-  _request,
+  request,
   response,
 ) => {
-  const equipment = await equipmentService.listAllEquipment();
-  response.status(200).json({ success: true, data: equipment });
+  const query = parseAdminEquipmentQuery(
+    request.query as Record<string, unknown>,
+  );
+  const result = await equipmentService.listAllEquipment(query);
+  response.status(200).json({
+    success: true,
+    message: "Admin equipment fetched successfully.",
+    data: result.equipment,
+    pagination: result.pagination,
+  });
 };
 
 export const updateEquipmentStatus: RequestHandler = async (

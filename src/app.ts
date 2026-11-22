@@ -6,6 +6,7 @@ import { env } from "./config/env.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFoundHandler } from "./middleware/notFound.js";
 import adminEquipmentRouter from "./routes/admin-equipment.routes.js";
+import adminManagementRouter from "./routes/admin-management.routes.js";
 import authTestRouter from "./routes/auth-test.routes.js";
 import bookingRouter from "./routes/booking.routes.js";
 import customerDashboardRouter from "./routes/customer-dashboard.routes.js";
@@ -41,6 +42,7 @@ app.use("/api/customer/dashboard", customerDashboardRouter);
 app.use("/api/owner/dashboard", ownerDashboardRouter);
 app.use("/api/equipment", equipmentRouter);
 app.use("/api/admin/equipment", adminEquipmentRouter);
+app.use("/api/admin", adminManagementRouter);
 app.use("/api/favorites", favoriteRouter);
 app.use("/api/payments", paymentRouter);
 if (env.NODE_ENV !== "production") {
