@@ -9,7 +9,7 @@ import {
 } from "../utils/customer-dashboard-validation.js";
 import * as dashboardService from "../services/customer-dashboard.service.js";
 
-const PROFILE_SELECT = "_id name email image phone role createdAt";
+const PROFILE_SELECT = "_id name email image phone address role createdAt";
 
 function getAuthenticatedCustomer(
   user: AuthenticatedUser | undefined,
@@ -27,6 +27,7 @@ function profileResponse(user: any) {
     email: user.email,
     image: user.image ?? null,
     phone: user.phone ?? null,
+    address: user.address ?? null,
     role: user.role,
     createdAt: user.createdAt ?? null,
   };

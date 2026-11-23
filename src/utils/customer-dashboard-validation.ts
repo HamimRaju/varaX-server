@@ -129,7 +129,7 @@ export function parseProfileUpdate(value: unknown): ProfileUpdate {
     throw new HttpError(400, "A JSON request body is required.");
   }
   const input = value as Record<string, unknown>;
-  const allowed = new Set(["name", "image", "phone"]);
+  const allowed = new Set(["name", "image", "phone", "address"]);
   const protectedOrUnknown = Object.keys(input).find((key) => !allowed.has(key));
   if (protectedOrUnknown) {
     throw new HttpError(
@@ -189,6 +189,20 @@ export function parseProfileUpdate(value: unknown): ProfileUpdate {
       throw new HttpError(400, "phone must be a valid contact number.");
     } else {
       set.phone = phone;
+    }
+  }
+  if (Object.hasOwn(input, "address")) {
+    if (
+      typeof input.address !== "string" ||
+      input.address.trim().length > 240
+    ) {
+      throw new HttpError(400, "address must be no longer than 240 characters.");
+    }
+    const address = input.address.trim();
+    if (!address) {
+      unset.push("address");
+    } else {
+      set.address = address;
     }
   }
   return { set, unset };

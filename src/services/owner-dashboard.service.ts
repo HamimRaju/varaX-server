@@ -535,7 +535,7 @@ export async function getOwnerDashboardEarnings(
   };
 }
 
-const OWNER_PROFILE_SELECT = "_id name email image phone role createdAt";
+const OWNER_PROFILE_SELECT = "_id name email image phone address role createdAt";
 
 function safeProfile(user: {
   _id: Types.ObjectId;
@@ -543,6 +543,7 @@ function safeProfile(user: {
   email: string;
   image?: string;
   phone?: string;
+  address?: string;
   role?: string;
   createdAt?: Date;
 }) {
@@ -552,6 +553,7 @@ function safeProfile(user: {
     email: user.email,
     image: user.image ?? null,
     phone: user.phone ?? null,
+    address: user.address ?? null,
     role: user.role,
     createdAt: user.createdAt ?? null,
   };

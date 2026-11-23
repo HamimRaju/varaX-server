@@ -22,6 +22,8 @@ import { successfulPaymentStages } from "./paid-payment-aggregation.js";
 
 const SAFE_USER_SELECT =
   "_id name email image phone role isActive createdAt";
+const SAFE_ADMIN_PROFILE_SELECT =
+  "_id name email image phone address role isActive createdAt";
 
 function makePagination(
   page: number,
@@ -788,7 +790,7 @@ export async function listAdminPayments(query: AdminPaymentQuery) {
 
 export async function getAdminDashboardProfile(adminId: Types.ObjectId) {
   return User.findOne({ _id: adminId, role: "admin", isActive: true })
-    .select(SAFE_USER_SELECT)
+    .select(SAFE_ADMIN_PROFILE_SELECT)
     .lean()
     .exec();
 }
@@ -811,7 +813,7 @@ export async function updateAdminDashboardProfile(
     updateDocument,
     { new: true, runValidators: true },
   )
-    .select(SAFE_USER_SELECT)
+    .select(SAFE_ADMIN_PROFILE_SELECT)
     .lean()
     .exec();
 }

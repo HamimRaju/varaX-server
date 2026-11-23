@@ -966,7 +966,7 @@ test("profile reads only safe customer fields", async () => {
   assert.equal("password" in data, false);
 });
 
-test("customers can update name, image, and phone without altering Better Auth protected fields", async () => {
+test("customers can update name, image, phone, and address without altering Better Auth protected fields", async () => {
   const response = await apiCall(
     "PATCH",
     "/api/customer/dashboard/profile",
@@ -975,6 +975,7 @@ test("customers can update name, image, and phone without altering Better Auth p
       name: "Updated Customer",
       image: "https://images.example.test/new-profile.jpg",
       phone: "+8801712345678",
+      address: "House 12, Dhaka",
     },
   );
   assert.equal(response.status, 200);
@@ -982,6 +983,7 @@ test("customers can update name, image, and phone without altering Better Auth p
   assert.equal(data.name, "Updated Customer");
   assert.equal(data.image, "https://images.example.test/new-profile.jpg");
   assert.equal(data.phone, "+8801712345678");
+  assert.equal(data.address, "House 12, Dhaka");
   assert.equal(data.role, "customer");
   assert.equal(data.emailVerified, undefined);
 });
