@@ -10,14 +10,17 @@ Express and TypeScript backend for the VaraX equipment rental platform.
 
 ## Getting started
 
-1. Install dependencies with `npm install`.
+1. Install dependencies with `npm ci`.
 2. Copy `.env.example` to `.env`.
-3. Set `MONGODB_URI` to the MongoDB connection string and `CLIENT_URL` to the
-   frontend origin (for example, `http://localhost:3000`).
+3. Configure every required value in `.env.example`, including MongoDB,
+   Stripe test credentials, the frontend origin, and the Better Auth issuer,
+   audience, and JWKS URL.
 4. Start the development server with `npm run dev`.
 
-The server connects to MongoDB before it begins listening. It will exit with a
-clear error if `MONGODB_URI` is missing or the database cannot be reached.
+The local Node server connects to MongoDB before it begins listening. It exits
+with a clear error if required environment values are invalid or the database
+cannot be reached. Booking and payment writes require a replica set (MongoDB
+Atlas provides this); standalone MongoDB fails closed with `503`.
 
 ## Scripts
 
@@ -44,6 +47,7 @@ clear error if `MONGODB_URI` is missing or the database cannot be reached.
 | `JWT_ISSUER` | Must match the issuer configured in Better Auth |
 | `JWT_AUDIENCE` | Must match the audience configured in Better Auth |
 | `JWKS_URL` | Better Auth's public JWKS endpoint, normally `/api/auth/jwks` |
+| `TRUST_PROXY_HOPS` | Trusted reverse-proxy hop count; defaults to `0` |
 
 Keep real credentials in the ignored `.env` file and never commit them.
 Express will verify Better Auth's asymmetric signing keys through JWKS; it does
@@ -58,6 +62,11 @@ user IDs remain compatible with the domain models' ObjectId references.
 Better Auth's `role` and `isActive` additional fields are server-owned and
 default to `customer` and `true`. Authentication accounts and sessions remain
 Better Auth's responsibility; the application User model does not store passwords.
+
+Run the regular Node service with `npm run dev` or `npm start` (`src/server.ts`).
+For Vercel's Express adapter, `src/index.ts` exports the same app and ensures a
+MongoDB connection before each request; `vercel.json` is intentionally not
+needed. Keep the Next.js client and this API as separate deployments.
 
 ## Temporary authorization smoke routes
 
@@ -408,40 +417,15 @@ After a real backend booking has been created, the client obtains a Better Auth
 backend access token with `authClient.token()` and sends the request above.
 Redirect to the returned `data.url`. Stripe returns to
 `/payment-success?bookingId=<bookingId>&session_id=<CHECKOUT_SESSION_ID>` or
-`/payment?bookingId=<bookingId>`. On either return, fetch
+`/payment-cancel?bookingId=<bookingId>`. On either return, fetch
 `GET /api/payments/<bookingId>/status` with the bearer token and show the
 backend's `data.status`; never set payment or booking status in local state
 based on the redirect.
 
-The current `varaX-client` payment and equipment booking flow still uses
-localStorage demo records, numeric equipment IDs, and `VX-…` booking IDs. Those
-are not MongoDB ObjectIds and cannot be charged by these endpoints. The client
-was intentionally left unchanged rather than adding a checkout call that could
-only fail; wire its booking creation to the Step 08 API and persist the returned
-Mongo booking ID before enabling this redirect flow.
-
-Once that backend booking ID is available, the minimal client call is:
-
-```ts
-const { data: tokenData } = await authClient.token();
-const response = await fetch(
-  `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/payments/create-checkout-session`,
-  {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${tokenData.token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ bookingId }),
-  },
-);
-const result = await response.json();
-if (!response.ok) throw new Error(result.message);
-window.location.assign(result.data.url);
-```
-
-After Stripe redirects back, use the authenticated
-`GET /api/payments/${bookingId}/status` response for the displayed outcome.
+The connected `varaX-client` creates bookings with `POST /api/bookings`,
+redirects to the returned Stripe Checkout URL, and checks status through the
+authenticated endpoint. The client never writes payment state from redirect
+parameters.
 
 ## Customer dashboard APIs
 
@@ -456,7 +440,7 @@ identity.
 | `GET /api/customer/dashboard/bookings` | Filtered and paginated booking history |
 | `GET /api/customer/dashboard/favorites` | Paged favorites using the existing favorite aggregation |
 | `GET /api/customer/dashboard/profile` | Safe customer profile |
-| `PATCH /api/customer/dashboard/profile` | Update name, profile image, and/or phone |
+| `PATCH /api/customer/dashboard/profile` | Update name, profile image, phone, and/or address |
 | `GET /api/customer/dashboard/activity` | Paged recent booking-created and payment-completed events |
 
 ### Overview and calculations
@@ -558,11 +542,11 @@ card details and pagination metadata. The default page size is `9`, maximum
 ### Profile and activity
 
 The profile response contains only `id`, `name`, `email`, `image`, `phone`,
-`role`, and `createdAt`. Email is read-only because email changes must go
-through Better Auth's verification flow. Profile updates accept only `name`,
-`image`, and `phone`; role, IDs, email, account status, and email-verification
-fields are rejected. Empty `image` or `phone` values clear those optional
-fields.
+`address`, `role`, and `createdAt`. Email is read-only because email changes
+must go through Better Auth's verification flow. Profile updates accept only
+`name`, `image`, `phone`, and `address`; role, IDs, email, account status, and
+email-verification fields are rejected. Empty `image`, `phone`, or `address`
+values clear those optional fields.
 
 Example update:
 
@@ -601,7 +585,7 @@ the dashboard.
 | `GET /api/owner/dashboard/rental-requests` | Filtered, sorted, paginated requests for the owner's equipment |
 | `GET /api/owner/dashboard/earnings` | Paid gross earnings and paginated recent payments |
 | `GET /api/owner/dashboard/profile` | Safe owner profile |
-| `PATCH /api/owner/dashboard/profile` | Update name, profile image, and/or phone |
+| `PATCH /api/owner/dashboard/profile` | Update name, profile image, phone, and/or address |
 
 The equipment endpoint accepts `page` (default `1`), `limit` (default `10`,
 maximum `50`), `status` (`pending`, `approved`, or `rejected`), `search`
@@ -763,10 +747,11 @@ Example earnings response:
 ### Owner profile and historical records
 
 The profile response contains only `id`, `name`, `email`, `image`, `phone`,
-`role`, and `createdAt`. Email is read-only and must be changed through the
-Better Auth verification flow. Updates accept only `name`, `image`, and `phone`;
-role, account status, email verification, email, IDs, and authentication fields
-are rejected. Empty `image` or `phone` values clear those optional fields.
+`address`, `role`, and `createdAt`. Email is read-only and must be changed
+through the Better Auth verification flow. Updates accept only `name`, `image`,
+`phone`, and `address`; role, account status, email verification, email, IDs,
+and authentication fields are rejected. Empty `image`, `phone`, or `address`
+values clear those optional fields.
 
 Equipment deletion is soft deletion. It removes a listing from active owner
 equipment counts and lists but does not delete its bookings or payments.
@@ -784,7 +769,7 @@ and `isActive` status.
 | --- | --- |
 | `GET /api/admin/dashboard/overview` | Platform user, equipment, booking, and revenue totals |
 | `GET /api/admin/dashboard/profile` | Safe current admin profile |
-| `PATCH /api/admin/dashboard/profile` | Update name, image, and/or phone |
+| `PATCH /api/admin/dashboard/profile` | Update name, image, phone, and/or address |
 | `GET /api/admin/users` | Searchable, role-filtered, paginated users |
 | `GET /api/admin/users/:id` | Safe user profile and account statistics |
 | `PATCH /api/admin/users/:id/role` | Assign `customer`, `owner`, or `admin` role |
@@ -970,7 +955,7 @@ controlled only by the existing verified Stripe webhook/recovery workflow.
 
 Admin profile reads expose only `_id`, name, email, image, phone, role, active
 status, and creation date. Updates reuse the existing profile validator and
-permit only `name`, `image`, and `phone`; role, status, email, IDs, email
+permit only `name`, `image`, `phone`, and `address`; role, status, email, IDs, email
 verification, passwords, and Better Auth fields are rejected.
 
 ## Admin and owner analytics APIs
@@ -1352,3 +1337,37 @@ Run `npm audit` during maintenance and review advisories before dependency
 updates. This stabilization pass did not apply major dependency upgrades. The
 backend's in-memory rate limits do not coordinate across multiple instances,
 and this repository does not host Better Auth's login endpoints.
+
+## Production deployment checklist
+
+1. Create a MongoDB Atlas database and database user with only the required
+   access. Add the API and Next.js hosting egress IPs to the Atlas network
+   allowlist. Atlas must support replica-set transactions. Use the same database
+   in both client `MONGODB_URI` and server `MONGODB_URI`.
+2. Deploy the Express repository to Vercel (the Express entry is
+   `src/index.ts`) or a Node host using `npm ci`, `npm run build`, and
+   `npm start`. Configure every server variable from `.env.example` in the
+   provider's secret manager. Use a stable HTTPS `CLIENT_URL`,
+   `JWT_ISSUER`, and `JWKS_URL`; the JWKS URL points to the deployed Next.js
+   host at `/api/auth/jwks`.
+3. Deploy `varaX-client` separately. Set `NEXT_PUBLIC_BACKEND_URL` to the
+   server origin (without `/api`), and align its Better Auth/JWT/MongoDB values
+   with the server. Configure Google OAuth and the private ImgBB key in the
+   client host as described in the client README.
+4. In Stripe, use test keys first. Set the server's
+   `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`; create a webhook at
+   `https://<api-host>/api/payments/webhook` for the event types listed in the
+   payment section. Confirm the connected Stripe account supports BDT before
+   enabling live checkout.
+5. Register a normal customer, then promote the first administrator by changing
+   only that user's `role` to `admin` with a trusted MongoDB tool. Do not
+   register an admin through the public form.
+6. Verify `GET https://<api-host>/api/health`, public equipment browsing,
+   protected requests with a real Better Auth token, image upload, and a Stripe
+   test checkout plus webhook delivery. Check that the deployed client origin
+   exactly matches `CLIENT_URL` and that its auth base URL matches
+   `BETTER_AUTH_URL`.
+
+Do not copy production secrets into source control, issue trackers, or chat.
+Use HTTPS for both deployments and keep the Stripe webhook signing secret
+separate from the Stripe API key.

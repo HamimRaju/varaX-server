@@ -1,46 +1,22 @@
+import express from "express";
 import app from "./app.js";
 import { connectDatabase } from "./config/database.js";
-import { env } from "./config/env.js";
 
-let httpServer: ReturnType<typeof app.listen> | undefined;
-let databaseConnection: Awaited<ReturnType<typeof connectDatabase>> | undefined;
-let shutdownStarted = false;
+// Vercel imports this default export as the Express HTTP handler. MongoDB
+// connections are reused across warm function invocations.
+const vercelApp = express();
 
-async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  if (shutdownStarted) return;
-  shutdownStarted = true;
-  console.info(`Received ${signal}; closing the server.`);
-
-  if (httpServer) {
-    await new Promise<void>((resolve) => {
-      httpServer?.close(() => resolve());
-    }); 
-  }
-
+vercelApp.use(async (_request, response, next) => {
   try {
-    await databaseConnection?.disconnect();
-    console.info("MongoDB connection closed.");
+    await connectDatabase();
+    next();
   } catch {
-    console.error("MongoDB connection could not be closed cleanly.");
-    process.exitCode = 1;
-  }
-}
-
-async function startServer(): Promise<void> {
-  try {
-    databaseConnection = await connectDatabase();
-
-    httpServer = app.listen(env.PORT, () => {
-      console.info(`VaraX server is listening on port ${env.PORT}.`);
+    response.status(503).json({
+      success: false,
+      message: "The database is temporarily unavailable.",
     });
-    process.once("SIGINT", () => void shutdown("SIGINT"));
-    process.once("SIGTERM", () => void shutdown("SIGTERM"));
-  } catch (error) {
-    console.error(
-      error instanceof Error ? error.message : "Server startup failed.",
-    );
-    process.exitCode = 1;
   }
-}
+});
+vercelApp.use(app);
 
-void startServer();
+export default vercelApp;
