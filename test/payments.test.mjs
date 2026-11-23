@@ -768,7 +768,7 @@ test("Checkout ignores client amounts and uses stored amount and BDT minor units
   assert.equal(capturedCheckoutParams.metadata.ownerId, ownerId.toString());
   assert.match(capturedCheckoutParams.success_url, /payment-success/);
   assert.match(capturedCheckoutParams.success_url, /\{CHECKOUT_SESSION_ID\}/);
-  assert.match(capturedCheckoutParams.cancel_url, /payment\?/);
+  assert.match(capturedCheckoutParams.cancel_url, /payment-cancel\?/);
   assert.match(capturedCheckoutOptions.idempotencyKey, /^varax-checkout-/);
   assert.equal(bookings[0].paymentStatus, "unpaid");
   assert.equal(bookings[0].bookingStatus, "pending");

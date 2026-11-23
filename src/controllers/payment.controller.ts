@@ -1,5 +1,4 @@
 import type { RequestHandler } from "express";
-import { env } from "../config/env.js";
 import { stripe, stripeWebhookSecret } from "../config/stripe.js";
 import type { AuthenticatedUser } from "../types/authenticated-user.js";
 import { HttpError } from "../utils/http-error.js";
@@ -47,20 +46,6 @@ export const getPaymentStatus: RequestHandler = async (request, response) => {
   const bookingId = parsePaymentBookingId(request.params.bookingId);
   const payment = await paymentService.getPaymentStatus(bookingId, user);
   response.status(200).json({ success: true, data: payment });
-};
-
-export const completeDemoPayment: RequestHandler = async (request, response) => {
-  if (env.NODE_ENV === "production" || !env.ENABLE_DEMO_PAYMENTS) {
-    throw new HttpError(404, "Not found.");
-  }
-  const user = getAuthenticatedUser(request.user);
-  const { bookingId } = parseCreateCheckoutInput(request.body);
-  const payment = await paymentService.completeDemoPayment(bookingId, user);
-  response.status(200).json({
-    success: true,
-    message: "Demo payment completed. No real charge was made.",
-    data: payment,
-  });
 };
 
 export const stripeWebhook: RequestHandler = async (request, response) => {

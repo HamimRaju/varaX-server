@@ -24,10 +24,6 @@ const environmentSchema = z
     JWT_ISSUER: z.string().trim().url(),
     JWT_AUDIENCE: z.string().trim().min(1),
     JWKS_URL: z.string().trim().url(),
-    ENABLE_DEMO_PAYMENTS: z
-      .enum(["true", "false"])
-      .default("false")
-      .transform((value) => value === "true"),
   })
   .superRefine((values, context) => {
     if (values.CLIENT_URL && !URL.canParse(values.CLIENT_URL)) {
@@ -43,14 +39,6 @@ const environmentSchema = z
         code: "custom",
         path: ["CLIENT_URL"],
         message: "CLIENT_URL is required in production.",
-      });
-    }
-
-    if (values.NODE_ENV === "production" && values.ENABLE_DEMO_PAYMENTS) {
-      context.addIssue({
-        code: "custom",
-        path: ["ENABLE_DEMO_PAYMENTS"],
-        message: "ENABLE_DEMO_PAYMENTS cannot be enabled in production.",
       });
     }
 

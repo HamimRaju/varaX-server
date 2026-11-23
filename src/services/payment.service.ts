@@ -101,7 +101,7 @@ function getCheckoutUrls(bookingId: Types.ObjectId) {
   const success = clientUrl("/payment-success", bookingId);
   return {
     successUrl: `${success}&session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl: clientUrl("/payment", bookingId),
+    cancelUrl: clientUrl("/payment-cancel", bookingId),
   };
 }
 
@@ -544,136 +544,6 @@ export async function getPaymentStatus(
     .lean()
     .exec();
   return paymentStatusDto(booking, payment);
-}
-
-/**
- * Development-only payment simulation. It records a paid payment for a pending
- * booking without contacting Stripe. Production startup rejects this mode.
- */
-export async function completeDemoPayment(
-  rawBookingId: unknown,
-  customer: AuthenticatedUser,
-) {
-  if (!(rawBookingId instanceof Types.ObjectId)) {
-    throw new HttpError(400, "bookingId must be a valid ObjectId.");
-  }
-  const bookingId = rawBookingId;
-
-  return inTransaction(async (session) => {
-    const booking = await Booking.findOne({
-      _id: bookingId,
-      customerId: customer.id,
-    })
-      .session(session)
-      .exec();
-    if (!booking) {
-      throw new HttpError(404, "Booking not found.");
-    }
-
-    if (booking.paymentStatus === "paid") {
-      const paidPayment = await Payment.findOne({ bookingId })
-        .sort({ createdAt: -1 })
-        .session(session)
-        .lean()
-        .exec();
-      return paymentStatusDto(booking.toObject({ virtuals: false }), paidPayment);
-    }
-
-    if (booking.bookingStatus !== "pending") {
-      throw new HttpError(409, "Only pending bookings can be paid.");
-    }
-    if (
-      booking.paymentStatus !== "unpaid" &&
-      booking.paymentStatus !== "failed"
-    ) {
-      throw new HttpError(409, "This booking is not awaiting payment.");
-    }
-
-    const amountMinorUnits = toMinorUnits(booking.totalAmount);
-    const paidAt = new Date();
-    const existingPayment = await Payment.findOne({ bookingId })
-      .sort({ createdAt: -1 })
-      .session(session)
-      .exec();
-
-    let payment;
-    if (existingPayment) {
-      existingPayment.set({
-        stripeSessionId: existingPayment.stripeSessionId.startsWith(
-          PLACEHOLDER_SESSION_PREFIX,
-        )
-          ? `demo_${randomUUID()}`
-          : existingPayment.stripeSessionId,
-        amount: Number(booking.totalAmount.toFixed(2)),
-        amountMinorUnits,
-        currency: STRIPE_CURRENCY,
-        paymentStatus: "paid",
-        fulfillmentStatus: "fulfilled",
-        paymentMethod: "demo",
-        paidAt,
-      });
-      await existingPayment.save({ session });
-      await Payment.updateOne(
-        { _id: existingPayment._id },
-        { $unset: { activeBookingId: 1, checkoutUrl: 1 } },
-        { session },
-      );
-      payment = existingPayment;
-    } else {
-      const [createdPayment] = await Payment.create(
-        [
-          {
-            bookingId,
-            customerId: booking.customerId,
-            ownerId: booking.ownerId,
-            equipmentId: booking.equipmentId,
-            stripeSessionId: `demo_${randomUUID()}`,
-            checkoutAttemptId: randomUUID(),
-            amount: Number(booking.totalAmount.toFixed(2)),
-            amountMinorUnits,
-            currency: STRIPE_CURRENCY,
-            paymentStatus: "paid",
-            fulfillmentStatus: "fulfilled",
-            paymentMethod: "demo",
-            paidAt,
-            stripeEventIds: [],
-          },
-        ],
-        { session },
-      );
-      if (!createdPayment) {
-        throw new HttpError(500, "Demo payment could not be recorded.");
-      }
-      payment = createdPayment;
-    }
-
-    const updated = await Booking.updateOne(
-      {
-        _id: bookingId,
-        customerId: customer.id,
-        bookingStatus: "pending",
-        paymentStatus: { $in: ["unpaid", "failed"] },
-      },
-      { $set: { paymentStatus: "paid" } },
-    )
-      .session(session)
-      .exec();
-    if (updated.matchedCount !== 1) {
-      throw new HttpError(409, "Booking changed while payment was being recorded.");
-    }
-
-    const updatedBooking = await Booking.findById(bookingId)
-      .session(session)
-      .lean()
-      .exec();
-    if (!updatedBooking) {
-      throw new HttpError(500, "Booking could not be reloaded.");
-    }
-    return paymentStatusDto(
-      updatedBooking,
-      payment.toObject({ virtuals: false }),
-    );
-  });
 }
 
 function getSessionPaymentIntentId(

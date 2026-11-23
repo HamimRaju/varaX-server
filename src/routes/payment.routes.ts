@@ -1,6 +1,5 @@
 import { Router } from "express";
 import {
-  completeDemoPayment,
   createCheckoutSession,
   getPaymentStatus,
 } from "../controllers/payment.controller.js";
@@ -18,13 +17,6 @@ paymentRouter.post(
   verifyRenter,
   checkoutLimiter,
   createCheckoutSession,
-);
-paymentRouter.post(
-  "/demo-complete",
-  verifyToken,
-  verifyRenter,
-  checkoutLimiter,
-  completeDemoPayment,
 );
 paymentRouter.get("/:bookingId/status", verifyToken, getPaymentStatus);
 
