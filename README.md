@@ -22,6 +22,20 @@ with a clear error if required environment values are invalid or the database
 cannot be reached. Booking and payment writes require a replica set (MongoDB
 Atlas provides this); standalone MongoDB fails closed with `503`.
 
+The example URI names the existing `test` database explicitly. If you change
+that database name, update both client and server URIs and migrate the existing
+`users` and application data first; MongoDB will otherwise show a new, empty
+database.
+
+For Vercel, configure the required server variables from `.env.example` in the
+server project's Production environment, then redeploy. In particular,
+`MONGODB_URI`, both Stripe keys, `CLIENT_URL`, `JWT_ISSUER`, `JWT_AUDIENCE`, and
+`JWKS_URL` must be present. The client and server must use the same MongoDB
+database and JWT values. The server's `/api/health` endpoint checks that the
+serverless function can initialize and connect to MongoDB; if it returns
+`503`, check the function logs for the missing setting or database connection
+failure.
+
 ## Scripts
 
 - `npm run dev` — run the server with `tsx` watch mode.
