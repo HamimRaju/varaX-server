@@ -20,6 +20,21 @@ const positiveIntegerQuery = z
   .transform(Number)
   .pipe(z.number().int().min(1).max(Number.MAX_SAFE_INTEGER));
 
+const categoryQuery = z
+  .string()
+  .trim()
+  .transform((value) => value.split(",").map((item) => item.trim()))
+  .pipe(z.array(equipmentCategorySchema).min(1).max(6))
+  .transform((categories) =>
+    categories.length === 1 ? categories[0]! : categories,
+  );
+const rentalTypeQuery = z
+  .string()
+  .trim()
+  .transform((value) => value.split(",").map((item) => item.trim()))
+  .pipe(z.array(equipmentRentalTypeSchema).min(1).max(3))
+  .transform((types) => (types.length === 1 ? types[0]! : types));
+
 const equipmentSearchQuerySchema = z
   .object({
     search: z
@@ -27,13 +42,13 @@ const equipmentSearchQuerySchema = z
       .trim()
       .max(120, "Search text cannot exceed 120 characters.")
       .optional(),
-    category: equipmentCategorySchema.optional(),
+    category: categoryQuery.optional(),
     location: z
       .string()
       .trim()
       .max(160, "Location cannot exceed 160 characters.")
       .optional(),
-    rentalType: equipmentRentalTypeSchema.optional(),
+    rentalType: rentalTypeQuery.optional(),
     minPrice: nonNegativePriceQuery.optional(),
     maxPrice: nonNegativePriceQuery.optional(),
     availability: z
@@ -80,9 +95,9 @@ export type EquipmentSort =
 
 export interface EquipmentSearchQuery {
   search?: string | undefined;
-  category?: EquipmentCategory | undefined;
+  category?: EquipmentCategory | EquipmentCategory[] | undefined;
   location?: string | undefined;
-  rentalType?: RentalType | undefined;
+  rentalType?: RentalType | RentalType[] | undefined;
   minPrice?: number | undefined;
   maxPrice?: number | undefined;
   availability?: boolean | undefined;

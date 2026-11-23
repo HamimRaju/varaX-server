@@ -12,7 +12,10 @@ import {
   escapeRegex,
   parseEquipmentSearchQuery,
 } from "../dist/utils/equipment-search-validation.js";
-import { parseCreateEquipmentInput } from "../dist/utils/equipment-validation.js";
+import {
+  parseCreateEquipmentInput,
+  parseUpdateEquipmentInput,
+} from "../dist/utils/equipment-validation.js";
 
 process.env.NODE_ENV = "test";
 process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/varax-search-tests";
@@ -103,6 +106,7 @@ let baseUrl;
 
 function matchesCondition(actual, expected) {
   if (expected && typeof expected === "object") {
+    if ("$in" in expected) return expected.$in.includes(actual);
     if (typeof expected.$regex === "string") {
       return new RegExp(expected.$regex, expected.$options ?? "").test(
         String(actual ?? ""),
@@ -304,6 +308,14 @@ test("category slugs and canonical categories filter correctly", async () => {
     parseEquipmentSearchQuery({ category: "Event Equipment" }),
   );
   assert.deepEqual(canonicalResult.equipment.map((item) => item.name), ["Event Speaker"]);
+
+  const multiCategoryResult = await searchPublicEquipment(
+    parseEquipmentSearchQuery({ category: "photography,event" }),
+  );
+  assert.deepEqual(
+    multiCategoryResult.equipment.map((item) => item.name).sort(),
+    ["Canon EOS R6", "Event Speaker"].sort(),
+  );
 });
 
 test("location filtering is a case-insensitive substring match", async () => {
@@ -321,6 +333,10 @@ test("rentalType filtering works", async () => {
     parseEquipmentSearchQuery({ rentalType: "WEEKLY" }),
   );
   assert.deepEqual(result.equipment.map((item) => item.name), ["Mahindra Tractor"]);
+  const multiTypeResult = await searchPublicEquipment(
+    parseEquipmentSearchQuery({ rentalType: "weekly,monthly" }),
+  );
+  assert.ok(multiTypeResult.equipment.length > 0);
 });
 
 test("minimum and maximum price filters work separately and together", async () => {
@@ -493,6 +509,17 @@ test("equipment write validation rejects booleans but accepts form numeric strin
   });
   assert.equal(parsed.price, 10.25);
   assert.equal(parsed.availableQuantity, 2);
+});
+
+test("equipment updates allow zero available units but reject invalid quantities", () => {
+  assert.equal(
+    parseUpdateEquipmentInput({ availableQuantity: "0" }).availableQuantity,
+    0,
+  );
+  assert.throws(
+    () => parseUpdateEquipmentInput({ availableQuantity: true }),
+    { statusCode: 400 },
+  );
 });
 
 test("combined filters use one Mongo filter for results and count", async () => {

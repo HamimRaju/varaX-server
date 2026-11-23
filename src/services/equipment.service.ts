@@ -51,7 +51,9 @@ export function buildPublicEquipmentFilter(
   }
 
   if (query.category) {
-    filter.category = query.category;
+    filter.category = Array.isArray(query.category)
+      ? { $in: query.category }
+      : query.category;
   }
 
   if (query.location) {
@@ -62,7 +64,9 @@ export function buildPublicEquipmentFilter(
   }
 
   if (query.rentalType) {
-    filter.rentalType = query.rentalType;
+    filter.rentalType = Array.isArray(query.rentalType)
+      ? { $in: query.rentalType }
+      : query.rentalType;
   }
 
   if (query.minPrice !== undefined || query.maxPrice !== undefined) {

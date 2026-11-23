@@ -62,6 +62,13 @@ const positiveIntegerInput = z
   ])
   .pipe(z.number().int().min(1));
 
+const nonNegativeIntegerInput = z
+  .union([
+    z.number().int(),
+    z.string().trim().regex(/^\d+$/).transform(Number),
+  ])
+  .pipe(z.number().int().min(0));
+
 const equipmentFieldsSchema = z.object({
   name: z.string().trim().min(1).max(90),
   description: z.string().trim().min(1).max(1_000),
@@ -80,6 +87,7 @@ const equipmentFieldsSchema = z.object({
 const createEquipmentSchema = equipmentFieldsSchema.strict();
 const updateEquipmentSchema = equipmentFieldsSchema
   .partial()
+  .extend({ availableQuantity: nonNegativeIntegerInput.optional() })
   .strict()
   .refine((fields) => Object.keys(fields).length > 0, {
     message: "Provide at least one equipment field to update.",
