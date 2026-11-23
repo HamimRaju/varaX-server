@@ -694,7 +694,7 @@ before(async () => {
     ownerB: await sign(ids.ownerB),
     customer: await sign(ids.customer),
   };
-  const app = (await import("../dist/app.js")).default;
+  const app = (await import("../dist/express-app.js")).default;
   server = createServer(app);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   apiBase = `http://127.0.0.1:${server.address().port}`;

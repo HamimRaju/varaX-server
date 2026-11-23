@@ -1,5 +1,5 @@
 import express from "express";
-import app from "./app.js";
+import app from "./express-app.js";
 import { connectDatabase } from "./config/database.js";
 
 // Vercel imports this default export as the Express HTTP handler. MongoDB

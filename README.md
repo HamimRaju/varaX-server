@@ -32,13 +32,13 @@ Atlas provides this); standalone MongoDB fails closed with `503`.
 
 ## Health check
 
-`GET http://localhost:5000/api/health`
+`GET http://localhost:5001/api/health`
 
 ## Environment variables
 
 | Variable | Description |
 | --- | --- |
-| `PORT` | HTTP port (defaults to `5000`) |
+| `PORT` | HTTP port (defaults to `5001`) |
 | `NODE_ENV` | `development`, `test`, or `production` |
 | `MONGODB_URI` | Required MongoDB connection string |
 | `STRIPE_SECRET_KEY` | Required Stripe secret key (`sk_test_…` or `sk_live_…`); server only |
@@ -403,7 +403,7 @@ historical Payment record or manually mark an unverified payment refunded.
 For local webhook development:
 
 ```sh
-stripe listen --forward-to localhost:5000/api/payments/webhook
+stripe listen --forward-to localhost:5001/api/payments/webhook
 ```
 
 Copy the CLI's `whsec_…` value into `STRIPE_WEBHOOK_SECRET`, then use Stripe
@@ -1154,7 +1154,7 @@ equipment, booking, payment, and timestamp joins/filters.
 Use `.env.example` as the local template. Required startup values are
 `MONGODB_URI`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `JWT_ISSUER`,
 `JWT_AUDIENCE`, and `JWKS_URL`. `CLIENT_URL` is required in production; `PORT`
-defaults to `5000`, `NODE_ENV` to `development`, and `TRUST_PROXY_HOPS` to `0`.
+defaults to `5001`, `NODE_ENV` to `development`, and `TRUST_PROXY_HOPS` to `0`.
 Production requires HTTPS for the client origin, issuer, and JWKS URL.
 
 CORS permits only the normalized origin from `CLIENT_URL` (one browser origin)

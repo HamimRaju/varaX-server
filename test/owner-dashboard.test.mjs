@@ -598,7 +598,7 @@ before(async () => {
     admin: await sign(adminId, "admin"),
   };
 
-  const app = (await import("../dist/app.js")).default;
+  const app = (await import("../dist/express-app.js")).default;
   apiServer = createServer(app);
   await new Promise((resolve) => apiServer.listen(0, "127.0.0.1", resolve));
   apiBase = `http://127.0.0.1:${apiServer.address().port}`;

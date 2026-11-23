@@ -3,7 +3,7 @@ import { z } from "zod";
 
 const environmentSchema = z
   .object({
-    PORT: z.coerce.number().int().min(1).max(65_535).default(5000),
+    PORT: z.coerce.number().int().min(1).max(65_535).default(5001),
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
     NODE_ENV: z
       .enum(["development", "test", "production"])

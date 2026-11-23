@@ -355,7 +355,7 @@ before(async () => {
     }
   };
 
-  const app = (await import("../dist/app.js")).default;
+  const app = (await import("../dist/express-app.js")).default;
   apiServer = createServer(app);
   apiBase = await listen(apiServer);
   const sign = async (userId, role) =>
