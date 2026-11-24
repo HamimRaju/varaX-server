@@ -1,6 +1,39 @@
-# VaraX Server
+# 🧰 VaraX Server
 
-Express and TypeScript backend for the VaraX equipment rental platform.
+> **The API behind VaraX** — an equipment-rental marketplace built with Express and TypeScript.
+
+![Node.js 20.19+](https://img.shields.io/badge/Node.js-%E2%89%A520.19-339933?logo=nodedotjs&logoColor=white)
+![Express 5](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?logo=mongodb&logoColor=white)
+![Stripe](https://img.shields.io/badge/Payments-Stripe-635BFF?logo=stripe&logoColor=white)
+
+| At a glance | Details |
+| --- | --- |
+| Runtime | Node.js `20.19+` |
+| API | Express 5 · TypeScript · ESM |
+| Data | MongoDB with Mongoose |
+| Payments | Stripe Checkout and signed webhooks |
+| Authentication | Better Auth JWT verification through JWKS |
+
+> [!IMPORTANT]
+> Booking and payment writes use MongoDB transactions. Use a replica set or sharded cluster; standalone MongoDB intentionally fails these writes with `503`.
+
+| Start here | API guides | Operations |
+| --- | --- | --- |
+| [Setup](#getting-started) · [Scripts](#scripts) · [Environment](#environment-variables) · [Health](#health-check) | [Equipment](#public-equipment-listing) · [Favorites](#favorites) · [Bookings](#bookings-and-availability) · [Payments](#stripe-checkout-and-payment-status) | [Security](#security-and-production-configuration) · [Deployment](#production-deployment-checklist) |
+| [Auth integration](#model-and-better-auth-integration) · [Smoke routes](#temporary-authorization-smoke-routes) | [Customer](#customer-dashboard-apis) · [Owner](#owner-dashboard-apis) · [Admin](#admin-dashboard-and-management-apis) · [Analytics](#admin-and-owner-analytics-apis) | [Stabilization notes](#stabilization-notes) |
+
+## How it fits together
+
+```mermaid
+flowchart LR
+    Client["varaX client"] -->|"REST + bearer JWT"| API["Express API"]
+    API -->|"Fetch signing keys"| JWKS["Better Auth JWKS"]
+    API -->|"Mongoose"| DB[("MongoDB")]
+    API -->|"Create Checkout Session"| Stripe["Stripe"]
+    Stripe -->|"Signed webhook"| API
+```
 
 ## Requirements
 
@@ -1260,105 +1293,8 @@ stops the HTTP listener and closes that connection.
 - This repository does not provide Better Auth's login endpoints or a shared
   distributed rate-limit store. No XSS content rewriting is applied to user
   text; clients must safely render it.
-
-## Security and production configuration
-
-### Required environment
-
-Copy `.env.example` to a private `.env` file for local development. MongoDB,
-Stripe, and JWT settings are required for startup. `PORT`, `NODE_ENV`, and
-`TRUST_PROXY_HOPS` have defaults; `CLIENT_URL` is required in production.
-
-| Variable | Purpose |
-| --- | --- |
-| `NODE_ENV` | `development`, `test`, or `production` |
-| `PORT` | HTTP listen port |
-| `MONGODB_URI` | MongoDB connection string |
-| `STRIPE_SECRET_KEY` | Stripe secret API key |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
-| `CLIENT_URL` | The single allowed browser origin |
-| `JWT_ISSUER` | Expected JWT issuer |
-| `JWT_AUDIENCE` | Expected JWT audience |
-| `JWKS_URL` | HTTPS JWKS endpoint in production |
-| `TRUST_PROXY_HOPS` | Number of trusted reverse-proxy hops; defaults to `0` |
-
-Never commit `.env` or real credentials. `CLIENT_URL` is treated as a one-origin
-CORS allowlist (its URL origin is used); production requires HTTPS. Requests
-without an `Origin` header are allowed for non-browser clients. Add multiple
-origins only by deliberately extending this allowlist after reviewing the
-deployment's browser origins.
-
-Set `TRUST_PROXY_HOPS` only when the service is behind a known proxy chain, and
-set it to the exact number of trusted hops. The proxy must overwrite incoming
-forwarding headers and direct access to the application should be restricted;
-incorrect trust settings can let clients spoof their source IP. The default
-`0` trusts no proxy headers.
-
-### Authentication, authorization, and validation
-
-The API verifies EdDSA JWT signatures against the configured remote JWKS and
-checks expiration, issuer, audience, and subject. It then loads the user from
-MongoDB and uses that record's role and `isActive` state for authorization.
-Inactive users are denied protected routes; role and status changes take effect
-on their next request. Better Auth's login/session endpoints are external to
-this backend, so their own deployment must rate-limit login and credential
-recovery endpoints as well.
-
-Request validation uses the existing Zod schemas and focused parsers. IDs are
-validated before database use; pagination and query enums are bounded; search
-input is treated literally with escaped regex metacharacters; protected update
-fields are rejected. User-entered descriptions and notes are preserved rather
-than destructively stripped—the API returns JSON and clients must render text
-with normal output escaping.
-
-### Request limits, CORS, headers, and logs
-
-Helmet is enabled. JSON and URL-encoded request bodies are limited to `100kb`,
-with URL-encoded parameters capped at `1000`; the raw Stripe webhook body is
-limited to `1mb` and is parsed before JSON middleware so signature verification
-uses the original bytes. Production CORS permits only the configured
-`CLIENT_URL`.
-
-The API applies per-process in-memory limits: protected requests are capped at
-600 per IP per 15 minutes; public equipment/search and availability reads at
-300 per IP per minute; booking writes at 30 per account per 15 minutes; checkout
-creation at 10 per account per 15 minutes; profile/favorite/admin writes at 60
-per account per 15 minutes; analytics at 60 per account per minute; and verified
-Stripe webhook requests at 500 per IP per minute. Stripe webhooks remain
-idempotent and the webhook cap is intentionally high to allow normal delivery
-and retries.
-
-These rate limits use each Node process's memory store. In a multi-instance
-deployment, limits are per instance, not globally shared; use a shared store at
-the deployment layer if a cross-instance quota is required. Morgan logs method,
-path, status, and duration without query strings or request bodies. Production
-5xx responses are generic and production error logs omit stack traces and error
-messages that could contain database details.
-
-### Payments, inventory, and database lifecycle
-
-Stripe payment success is accepted only from signature-verified webhooks. The
-stored booking amount and BDT currency are checked before fulfillment; duplicate
-events are idempotent. Checkout redirects do not establish payment success.
-Payment and booking transitions run transactionally, and unfulfillable
-successful payments use the existing refund-recovery workflow.
-
-Booking creation, confirmation, cancellation, and relevant payment transitions
-serialize inventory writes in MongoDB transactions. Production MongoDB must be
-a replica set or sharded cluster for these operations. If transactions are
-unavailable, booking/payment writes fail closed with `503`; the backend does
-not silently fall back to unsafe non-transactional inventory changes.
-
-The application reuses one Mongoose connection. On `SIGINT` or `SIGTERM`, it
-stops accepting HTTP requests and closes the MongoDB connection. `.env` files
-are ignored by Git; `.env.example` contains placeholders only.
-
-### Dependency audit and limitations
-
-Run `npm audit` during maintenance and review advisories before dependency
-updates. This stabilization pass did not apply major dependency upgrades. The
-backend's in-memory rate limits do not coordinate across multiple instances,
-and this repository does not host Better Auth's login endpoints.
+- Run `npm audit` during dependency maintenance and review advisories before
+  upgrading dependencies.
 
 ## Production deployment checklist
 
