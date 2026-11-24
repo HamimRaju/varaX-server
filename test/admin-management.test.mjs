@@ -567,6 +567,7 @@ before(async () => {
     userCountDocuments: User.countDocuments,
     userAggregate: User.aggregate,
     equipmentFind: Equipment.find,
+    equipmentFindById: Equipment.findById,
     equipmentCountDocuments: Equipment.countDocuments,
     equipmentAggregate: Equipment.aggregate,
     bookingAggregate: Booking.aggregate,
@@ -708,6 +709,26 @@ before(async () => {
           return result;
         });
       });
+    },
+  });
+  Object.defineProperty(Equipment, "findById", {
+    configurable: true,
+    writable: true,
+    value(id) {
+      const item = equipmentRows.find((row) => sameId(row._id, id));
+      return {
+        exec: async () =>
+          item
+            ? {
+                ...item,
+                async save() {
+                  item.status = this.status;
+                  item.isDeleted = this.isDeleted;
+                  return this;
+                },
+              }
+            : null,
+      };
     },
   });
   Object.defineProperty(Equipment, "countDocuments", {
@@ -887,6 +908,7 @@ after(async () => {
       }],
       [models.Equipment, {
         find: originals.equipmentFind,
+        findById: originals.equipmentFindById,
         countDocuments: originals.equipmentCountDocuments,
         aggregate: originals.equipmentAggregate,
       }],
@@ -1318,6 +1340,33 @@ test("admin equipment list reuses the existing moderation endpoint with filters"
     ).status,
     400,
   );
+});
+
+test("admin approval publishes an owner submission to the public equipment feed", async () => {
+  const forbidden = await apiCall(
+    "PATCH",
+    `/api/admin/equipment/${ids.pendingEquipment}/status`,
+    tokens.owner,
+    { status: "approved" },
+  );
+  assert.equal(forbidden.status, 403);
+
+  const approval = await apiCall(
+    "PATCH",
+    `/api/admin/equipment/${ids.pendingEquipment}/status`,
+    tokens.admin,
+    { status: "approved" },
+  );
+  assert.equal(approval.status, 200);
+  assert.equal((await approval.json()).data.status, "approved");
+
+  const publicResponse = await apiCall(
+    "GET",
+    "/api/equipment?sort=newest&page=1&limit=50",
+  );
+  assert.equal(publicResponse.status, 200);
+  const publicListings = (await publicResponse.json()).data;
+  assert.ok(publicListings.some((item) => item.name === "Pending Lens"));
 });
 
 test("admin bookings can be searched, filtered, paginated, and read with safe payment summary", async () => {

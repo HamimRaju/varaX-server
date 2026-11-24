@@ -390,6 +390,8 @@ export async function getOwnerDashboardRentalRequests(
         endDate: booking.endDate,
         quantity: booking.quantity,
         rentalType: booking.rentalType,
+        rentalDuration: booking.rentalDuration,
+        contactNumber: booking.contactNumber,
         amount: booking.totalAmount,
         paymentStatus: booking.paymentStatus ?? "unpaid",
         bookingStatus:

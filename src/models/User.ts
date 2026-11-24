@@ -46,7 +46,8 @@ userSchema.index(
 
 // Configure Better Auth with user.modelName: "users" to share this collection,
 // and keep its user IDs as MongoDB ObjectIds for the other models' ObjectId refs.
-// Its role additional field should use input: false so users cannot self-assign roles.
+// Public signup may create customers or owners; Better Auth's create hook must
+// sanitize the role and never allow public registration to create administrators.
 export const User =
   (mongoose.models.User as Model<UserFields> | undefined) ??
   mongoose.model<UserFields>("User", userSchema, "users");

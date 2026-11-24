@@ -27,12 +27,24 @@ app.use(helmet());
 const allowedClientOrigin = env.CLIENT_URL
   ? new URL(env.CLIENT_URL).origin
   : undefined;
+const allowedClientOrigins = new Set([
+  ...(allowedClientOrigin ? [allowedClientOrigin] : []),
+  ...(env.NODE_ENV === "development"
+    ? [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+      ]
+    : []),
+]);
 app.use(
   cors({
     credentials: true,
     origin(origin, callback) {
-      // Non-browser clients do not send Origin; browser clients must match CLIENT_URL.
-      callback(null, !origin || origin === allowedClientOrigin);
+      // Non-browser clients do not send Origin. In development, also allow the
+      // local Next.js origins so a deployed CLIENT_URL does not block local work.
+      callback(null, !origin || allowedClientOrigins.has(origin));
     },
   }),
 );

@@ -17,6 +17,7 @@ export async function connectDatabase(): Promise<typeof mongoose> {
   }
 
   const pendingConnection = mongoose.connect(env.MONGODB_URI, {
+    dbName: env.MONGODB_DB_NAME,
     serverSelectionTimeoutMS: 10_000,
   });
   connectionPromise = pendingConnection;

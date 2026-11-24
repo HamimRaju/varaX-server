@@ -12,6 +12,7 @@ const environmentSchema = z
       .string()
       .trim()
       .min(1, "MONGODB_URI must be configured before the server can start."),
+    MONGODB_DB_NAME: z.string().trim().min(1).default("varax"),
     STRIPE_SECRET_KEY: z
       .string()
       .trim()

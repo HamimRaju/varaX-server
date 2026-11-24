@@ -22,10 +22,10 @@ with a clear error if required environment values are invalid or the database
 cannot be reached. Booking and payment writes require a replica set (MongoDB
 Atlas provides this); standalone MongoDB fails closed with `503`.
 
-The example URI names the existing `test` database explicitly. If you change
-that database name, update both client and server URIs and migrate the existing
-`users` and application data first; MongoDB will otherwise show a new, empty
-database.
+The example URI names the existing `varax` database explicitly. The client and
+server must use that same database so authentication records and marketplace
+data stay in sync; a mismatched or omitted database name can silently write to
+MongoDB's default `test` database instead.
 
 For Vercel, configure the required server variables from `.env.example` in the
 server project's Production environment, then redeploy. In particular,
@@ -48,6 +48,11 @@ failure.
 
 `GET http://localhost:5001/api/health`
 
+In development, CORS allows the configured `CLIENT_URL` plus the standard
+Next.js origins `http://localhost:3000`, `http://localhost:3001`,
+`http://127.0.0.1:3000`, and `http://127.0.0.1:3001`. Production allows only
+the configured `CLIENT_URL`.
+
 ## Environment variables
 
 | Variable | Description |
@@ -55,6 +60,7 @@ failure.
 | `PORT` | HTTP port (defaults to `5001`) |
 | `NODE_ENV` | `development`, `test`, or `production` |
 | `MONGODB_URI` | Required MongoDB connection string |
+| `MONGODB_DB_NAME` | MongoDB database name; defaults to `varax` |
 | `STRIPE_SECRET_KEY` | Required Stripe secret key (`sk_test_…` or `sk_live_…`); server only |
 | `STRIPE_WEBHOOK_SECRET` | Required webhook signing secret (`whsec_…`); server only |
 | `CLIENT_URL` | Frontend origin allowed by CORS; required in production |
@@ -73,9 +79,11 @@ The Mongoose user model and Better Auth both use the `users` collection. Better
 Auth uses MongoDB-generated ObjectIds (`advanced.database.generateId: false`) so
 user IDs remain compatible with the domain models' ObjectId references.
 
-Better Auth's `role` and `isActive` additional fields are server-owned and
-default to `customer` and `true`. Authentication accounts and sessions remain
-Better Auth's responsibility; the application User model does not store passwords.
+New public registrations may request `customer` or `owner`; the Better Auth
+user-create hook sanitizes this value and always converts any other requested
+role (including `admin`) to `customer`. `isActive` remains server-owned and
+defaults to `true`. Authentication accounts and sessions remain Better Auth's
+responsibility; the application User model does not store passwords.
 
 Run the regular Node service with `npm run dev` or `npm start` (`src/server.ts`).
 For Vercel's Express adapter, `src/index.ts` exports the same app and ensures a
